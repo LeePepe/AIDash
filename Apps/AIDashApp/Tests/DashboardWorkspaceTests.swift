@@ -2249,5 +2249,36 @@ struct DashboardWorkspaceTests {
         #expect(legacy.qualityBehavior == nil)
         #expect(legacy.qualityJudge == nil)
     }
+
+    @Test("Skills 4x4 object lenses and quality-driven aggregates stay deterministic")
+    func skillsFourByFourObjectLensAndAggregateContracts() throws {
+        let report = try JSONDecoder().decode(
+            SkillsRoiReport.self,
+            from: TK3Fixtures.data("skills-roi-dense.json")
+        )
+        #expect(SkillsRoiObjectLens.allCases.map(\.rawValue) == ["overview", "scripts", "documents", "quality"])
+        #expect(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: "team-lead")?.skill == "team-lead")
+        #expect(SkillsRoiDiagnosticsCardView.activeSkillDetail(in: report, selectedSkill: "missing", filter: .repoBound) == nil)
+
+        let details = report.skillDetails.filter { !$0.isGhost }
+        #expect(SkillsRoiDiagnosticsCardView.aggregateScriptP95(details.flatMap(\.scripts)) == 145)
+        #expect(details.reduce(0) { $0 + $1.references.count } >= details.reduce(0) { $0 + $1.unhitRefsCount })
+        #expect(details.reduce(0) { $0 + $1.evalCases.count } == 1)
+
+        let qualityPayload = """
+        {
+          "metadata": {"sample_size": 4, "coverage_status": "healthy"},
+          "diagnostics": {},
+          "quality_behavior": [
+            {"skill": "fast", "observed_invocations": 10, "eligible_invocations": 10, "active_duration_median_sec": 60, "first_pass_satisfaction_rate": 0.8, "satisfaction_eligible_invocations": 10},
+            {"skill": "slow", "observed_invocations": 30, "eligible_invocations": 30, "active_duration_median_sec": 120, "first_pass_satisfaction_rate": 0.6, "satisfaction_eligible_invocations": 30}
+          ]
+        }
+        """
+        let qualityReport = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(qualityPayload.utf8))
+        let rows = try #require(qualityReport.qualityBehavior)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateActiveDurationMedian(rows) == 120)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateSatisfactionRate(rows) == 0.65)
+    }
 }
 #endif

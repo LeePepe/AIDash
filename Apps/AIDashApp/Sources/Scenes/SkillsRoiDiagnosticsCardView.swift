@@ -16,34 +16,72 @@
             case .flywheel: skillsText("flywheel", "自演进飞轮")
             }
         }
+    }
 
-        private enum SkillsVitalDimension: String, CaseIterable, Identifiable {
-            case adoption, efficiency, quality, evolution
+    private enum SkillsVitalDimension: String, CaseIterable, Identifiable {
+        case adoption, efficiency, quality, evolution
 
-            var id: String { rawValue }
+        var id: String { rawValue }
 
-            var title: String {
-                switch self {
-                case .adoption: skillsText("vital_adoption_title", "规模与活跃")
-                case .efficiency: skillsText("vital_efficiency_title", "效率与耗时")
-                case .quality: skillsText("vital_quality_title", "质量与稳定")
-                case .evolution: skillsText("vital_evolution_title", "质检与演进")
-                }
+        var title: String {
+            switch self {
+            case .adoption: skillsText("vital_adoption_title", "规模与活跃")
+            case .efficiency: skillsText("vital_efficiency_title", "效率与耗时")
+            case .quality: skillsText("vital_quality_title", "质量与稳定")
+            case .evolution: skillsText("vital_evolution_title", "质检与演进")
+            }
+        }
+    }
+
+    public enum SkillsRoiObjectLens: String, CaseIterable, Identifiable {
+        case overview, scripts, documents, quality
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .overview: skillsText("object_overview", "分 Skill 总览")
+            case .scripts: skillsText("object_scripts", "内部脚本")
+            case .documents: skillsText("object_documents", "文档本身")
+            case .quality: skillsText("object_quality", "质检与 Eval")
+            }
+        }
+    }
+
+    private enum SkillScriptFilter: String, CaseIterable, Identifiable {
+        case all, highError, slowestP95, unpracticed
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all: skillsText("script_filter_all", "全部脚本")
+            case .highError: skillsText("script_filter_error", "高报错")
+            case .slowestP95: skillsText("script_filter_slowest", "最慢 P95")
+            case .unpracticed: skillsText("script_filter_unpracticed", "未触发")
             }
         }
 
-        private enum SkillsObjectLens: String, CaseIterable, Identifiable {
-            case overview, scripts, documents, quality
+        func matches(_ script: SkillScriptDetail) -> Bool {
+            switch self {
+            case .all: true
+            case .highError: (script.successRate ?? 1) < 0.9
+            case .slowestP95: (script.p95Ms ?? 0) > 0
+            case .unpracticed: script.isUnpracticed || (script.calls30d ?? 0) == 0
+            }
+        }
+    }
 
-            var id: String { rawValue }
+    private enum SkillQualityView: String, CaseIterable, Identifiable {
+        case changes, pending, coverage
 
-            var title: String {
-                switch self {
-                case .overview: skillsText("object_overview", "分 Skill 总览")
-                case .scripts: skillsText("object_scripts", "内部脚本")
-                case .documents: skillsText("object_documents", "文档本身")
-                case .quality: skillsText("object_quality", "质检与 Eval")
-                }
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .changes: skillsText("quality_view_changes", "版本变动")
+            case .pending: skillsText("quality_view_pending", "待优化与修复")
+            case .coverage: skillsText("quality_view_coverage", "Eval 覆盖")
             }
         }
     }
@@ -178,11 +216,14 @@
         let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
         @State private var lens: SkillsRoiLens
         @State private var showingMetadata = false
+        @Environment(\.theme) private var theme
         @State private var inspectorFilter: SkillInspectorFilter
         @State private var evolutionFilter: SkillVersionEvolutionFilter
         @State private var showAllUsageSkills = false
         @State private var vitalDimension: SkillsVitalDimension = .adoption
-        @State private var objectLens: SkillsObjectLens = .overview
+        @State private var objectLens: SkillsRoiObjectLens
+        @State private var scriptFilter: SkillScriptFilter = .all
+        @State private var qualityView: SkillQualityView = .coverage
         @State private var selectedSkillDetail: SkillInspectorDetail?
         public init(
             summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?,
@@ -194,12 +235,14 @@
             initialFilter: SkillInspectorFilter = .all,
             initialSubTab _: SkillInspectorSubTab = .definition,
             initialPreviewRelativePath _: String? = nil,
-            previewHomeURL _: URL? = nil
+            previewHomeURL _: URL? = nil,
+            initialObjectLens: SkillsRoiObjectLens = .overview
         ) {
             self.summary = summary
             _lens = State(initialValue: initialLens)
             _inspectorFilter = State(initialValue: initialFilter)
             _evolutionFilter = State(initialValue: initialEvolutionFilter)
+            _objectLens = State(initialValue: initialObjectLens)
         }
 
         public var body: some View {
@@ -234,7 +277,7 @@
 
             HStack(spacing: 8) {
                 Picker(skillsText("object_lens", "对象切面"), selection: $objectLens) {
-                    ForEach(SkillsObjectLens.allCases) { lens in
+                    ForEach(SkillsRoiObjectLens.allCases) { lens in
                         Text(lens.title).tag(lens)
                     }
                 }
@@ -282,9 +325,9 @@
             let active = Self.activeVsTotalCounts(in: report)
             let details = managedDetails(report).filter { !$0.isGhost }
             let calls = details.reduce(0) { $0 + $1.loads7d }
-            let scriptP50 = details.flatMap(\.scripts).compactMap(\.p95Ms).min()
-            let behavior = report.qualityBehavior?.compactMap { $0.activeDurationMedianSec }.sorted().first
-            let satisfaction = report.qualityBehavior?.compactMap(\.firstPassSatisfactionRate).first
+            let scriptMedian = Self.aggregateScriptP95(details.flatMap(\.scripts))
+            let behavior = Self.aggregateActiveDurationMedian(report.qualityBehavior ?? [])
+            let satisfaction = Self.aggregateSatisfactionRate(report.qualityBehavior ?? [])
             let judged = report.qualityJudge?.judgedSkillCount
             let evalCount = details.reduce(0) { $0 + $1.evalCases.count }
             let value: String
@@ -296,17 +339,17 @@
                 subtitle = "\(skillsText("calls_7d", "本周")) \(calls) \(skillsText("unit_times", "次"))"
                 tint = .accentColor
             case .efficiency:
-                value = behavior.map { String(format: "%.1fm", $0 / 60) } ?? scriptP50.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
-                subtitle = scriptP50.map { "\(skillsText("script_median", "脚本中位")) \(Int($0))ms" } ?? skillsText("no_duration", "暂无耗时数据")
-                tint = .blue
+                value = behavior.map { String(format: "%.1fm", $0 / 60) } ?? scriptMedian.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")
+                subtitle = scriptMedian.map { "\(skillsText("script_p95_median", "P95 中位")) \(Int($0))ms" } ?? skillsText("no_duration", "暂无耗时数据")
+                tint = theme.classificationTint(.relationship)
             case .quality:
                 value = satisfaction.map { "\(Int($0 * 100))%" } ?? Self.overallPassValueForReport(report).map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知")
                 subtitle = judged.map { "\(skillsText("judged", "抽检")) \($0)" } ?? skillsText("no_judgement", "暂无抽检数据")
-                tint = .green
+                tint = theme.success
             case .evolution:
                 value = "\(skillsText("eval", "Eval")) \(evalCount)/\(max(details.count, 1))"
                 subtitle = "\(skillsText("evolution_fixed", "已修")) \(Self.curedRoadblocks(in: report).count) · \(skillsText("evolution_pending", "待优化")) \(report.resolvedSkillRetro.proposals.count)"
-                tint = .orange
+                tint = theme.warning
             }
             return VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -416,55 +459,118 @@
         }
 
         @ViewBuilder private func scriptsStage(_ report: SkillsRoiReport) -> some View {
-            let scripts = managedDetails(report).flatMap { detail in
+            let filteredScripts = managedDetails(report).flatMap { detail in
                 detail.scripts.map { (detail.skill, $0) }
-            }
-            DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
-                ForEach(Array(scripts.enumerated()), id: \.offset) { _, item in
-                    let (skill, script) = item
-                    detailCard(title: script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath, subtitle: skill) {
-                        HStack {
-                            compactMetric("\(script.calls30d ?? 0)", skillsText("calls_30d", "30天调用"))
-                            compactMetric(script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("success", "成功率"))
-                            compactMetric(script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), "P95")
-                        }
+            }.filter { scriptFilter.matches($0.1) }
+            let scripts = scriptFilter == .slowestP95
+                ? filteredScripts.sorted { ($0.1.p95Ms ?? 0) > ($1.1.p95Ms ?? 0) }
+                : filteredScripts
+            VStack(alignment: .leading, spacing: 8) {
+                Picker(skillsText("script_filter", "脚本筛选"), selection: $scriptFilter) {
+                    ForEach(SkillScriptFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
                     }
-                    .captureDashboardGeometry(id: "skills-row-\(skill)-script", role: "cell")
+                }
+                .pickerStyle(.segmented)
+                .frame(minHeight: 28)
+                DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
+                    ForEach(Array(scripts.enumerated()), id: \.offset) { _, item in
+                        let (skill, script) = item
+                        detailCard(title: script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath, subtitle: skill) {
+                            HStack {
+                                compactMetric("\(script.calls30d ?? 0)", skillsText("calls_30d", "30天调用"))
+                                compactMetric(script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("success", "成功率"))
+                                compactMetric(script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), skillsText("p95", "P95"))
+                            }
+                        }
+                        .captureDashboardGeometry(id: "skills-row-\(skill)-script", role: "cell")
+                    }
                 }
             }
         }
 
         @ViewBuilder private func documentsStage(_ report: SkillsRoiReport) -> some View {
             let details = managedDetails(report).sorted { $0.skillMdLines > $1.skillMdLines }
-            DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
-                ForEach(details) { detail in
-                    detailCard(title: detail.skill, subtitle: skillsText("document_size", "说明体量")) {
-                        HStack {
-                            compactMetric("\(detail.skillMdLines)", skillsText("lines", "行"))
-                            compactMetric("\(detail.bodyTokensEst)", skillsText("words", "词"))
-                            compactMetric("\(detail.unhitRefsCount)", skillsText("unhit_refs", "未命中参考"))
+            let totalLines = details.reduce(0) { $0 + $1.skillMdLines }
+            let totalWords = details.reduce(0) { $0 + $1.bodyTokensEst }
+            let totalReferences = details.reduce(0) { $0 + $1.references.count }
+            let unhitReferences = details.reduce(0) { $0 + $1.unhitRefsCount }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(skillsText("document_summary", "说明文档")) \(totalLines) \(skillsText("lines", "行")) / \(totalWords) \(skillsText("words", "词")) · \(skillsText("references_hit", "参考命中")) \(max(0, totalReferences - unhitReferences))/\(totalReferences) · \(skillsText("redundancy", "冗余")) \(unhitReferences)")
+                    .font(.caption)
+                    .foregroundStyle(theme.text(.body))
+                DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
+                    ForEach(details) { detail in
+                        detailCard(title: detail.skill, subtitle: skillsText("document_size", "说明体量")) {
+                            HStack {
+                                compactMetric("\(detail.skillMdLines)", skillsText("lines", "行"))
+                                compactMetric("\(detail.bodyTokensEst)", skillsText("words", "词"))
+                                compactMetric("\(detail.references.count - detail.unhitRefsCount)/\(detail.references.count)", skillsText("reference_hit", "参考命中"))
+                            }
                         }
+                        .captureDashboardGeometry(id: "skills-row-\(detail.skill)-document", role: "cell")
                     }
-                    .captureDashboardGeometry(id: "skills-row-\(detail.skill)-document", role: "cell")
                 }
             }
         }
 
         @ViewBuilder private func qualityStage(_ report: SkillsRoiReport) -> some View {
-            let rows = report.qualityJudge?.skills ?? []
-            if rows.isEmpty {
-                Text(skillsText("no_quality_rows", "暂无质检明细")).font(.caption).foregroundStyle(.secondary)
-            } else {
-                DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
-                    ForEach(rows) { row in
-                        detailCard(title: row.skill, subtitle: row.coverageStatus ?? skillsText("quality", "质量")) {
-                            HStack {
-                                compactMetric("\(row.judged ?? 0)", skillsText("judged", "抽检"))
-                                compactMetric(row.scoreMean.map { String(format: "%.1f", $0) } ?? skillsText("unknown", "未知"), skillsText("score", "评分"))
-                                compactMetric(row.coveragePct.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("coverage", "覆盖"))
+            Picker(skillsText("quality_view", "质检视图"), selection: $qualityView) {
+                ForEach(SkillQualityView.allCases) { view in
+                    Text(view.title).tag(view)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(minHeight: 28)
+            switch qualityView {
+            case .changes:
+                versionQualityStage(report)
+            case .pending:
+                pendingQualityStage(report)
+            case .coverage:
+                let rows = report.qualityJudge?.skills ?? []
+                if rows.isEmpty {
+                    Text(skillsText("no_quality_rows", "暂无质检明细")).font(.caption).foregroundStyle(theme.text(.body))
+                } else {
+                    DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
+                        ForEach(rows) { row in
+                            detailCard(title: row.skill, subtitle: row.coverageStatus ?? skillsText("quality", "质量")) {
+                                HStack {
+                                    compactMetric("\(row.judged ?? 0)", skillsText("judged", "抽检"))
+                                    compactMetric(row.scoreMean.map { String(format: "%.1f", $0) } ?? skillsText("unknown", "未知"), skillsText("score", "评分"))
+                                    compactMetric(row.coveragePct.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("coverage", "覆盖"))
+                                }
                             }
                         }
                     }
+                }
+            }
+        }
+
+        @ViewBuilder private func versionQualityStage(_ report: SkillsRoiReport) -> some View {
+            let rows = report.versionEvolution.filter { $0.beforeVersion != nil }
+            DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
+                ForEach(rows) { row in
+                    detailCard(title: row.skill, subtitle: Self.formatVersionComparison(before: row.beforeVersion?.combinedVersion, current: row.combinedVersion)) {
+                        Text(evolutionSignalsText(row).text).font(.caption).foregroundStyle(theme.text(.body))
+                    }
+                }
+            }
+        }
+
+        @ViewBuilder private func pendingQualityStage(_ report: SkillsRoiReport) -> some View {
+            let proposals = report.resolvedSkillRetro.proposals
+            let fixed = Self.curedRoadblocks(in: report)
+            DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
+                detailCard(title: skillsText("pending", "待优化"), subtitle: "\(proposals.count)") {
+                    Text(proposals.first?.displayReason ?? skillsText("no_pending", "暂无待优化项"))
+                        .font(.caption)
+                        .foregroundStyle(theme.text(.body))
+                }
+                detailCard(title: skillsText("fixed", "已修复"), subtitle: "\(fixed.count)") {
+                    Text(fixed.first.map { "\($0.skill) · \($0.preFixCount) → \($0.postFixCount)" } ?? skillsText("no_fixed", "暂无已修复项"))
+                        .font(.caption)
+                        .foregroundStyle(theme.text(.body))
                 }
             }
         }
@@ -477,7 +583,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+            .background(theme.neutrals.inner.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
         }
 
         private func sortedDetails(_ report: SkillsRoiReport) -> [SkillInspectorDetail] {
@@ -498,6 +604,50 @@
         private static func overallPassValueForReport(_ report: SkillsRoiReport) -> Double? {
             let rates = report.skillDetails.compactMap { validPassRate($0.r1PassRate) }
             return rates.isEmpty ? nil : rates.reduce(0, +) / Double(rates.count)
+        }
+
+        public static func medianValue(_ values: [Double]) -> Double? {
+            let sorted = values.filter(\.isFinite).sorted()
+            guard !sorted.isEmpty else { return nil }
+            let middle = sorted.count / 2
+            if sorted.count.isMultiple(of: 2) {
+                return (sorted[middle - 1] + sorted[middle]) / 2
+            }
+            return sorted[middle]
+        }
+
+        public static func aggregateScriptP95(_ scripts: [SkillScriptDetail]) -> Double? {
+            medianValue(scripts.compactMap(\.p95Ms))
+        }
+
+        public static func aggregateActiveDurationMedian(_ rows: [SkillQualityBehaviorRow]) -> Double? {
+            let weighted = rows.compactMap { row -> (Double, Int)? in
+                guard let value = row.activeDurationMedianSec, value.isFinite else { return nil }
+                return (value, max(1, row.eligibleInvocations ?? row.observedInvocations ?? 1))
+            }
+            return weightedMedian(weighted)
+        }
+
+        public static func aggregateSatisfactionRate(_ rows: [SkillQualityBehaviorRow]) -> Double? {
+            let weighted = rows.compactMap { row -> (Double, Int)? in
+                guard let value = row.firstPassSatisfactionRate, value.isFinite, (0 ... 1).contains(value) else { return nil }
+                return (value, max(1, row.satisfactionEligibleInvocations ?? row.eligibleInvocations ?? row.observedInvocations ?? 1))
+            }
+            guard !weighted.isEmpty else { return nil }
+            let totalWeight = weighted.reduce(0) { $0 + $1.1 }
+            return weighted.reduce(0.0) { $0 + $1.0 * Double($1.1) } / Double(totalWeight)
+        }
+
+        private static func weightedMedian(_ values: [(Double, Int)]) -> Double? {
+            guard !values.isEmpty else { return nil }
+            let sorted = values.sorted { $0.0 < $1.0 }
+            let target = Double(sorted.reduce(0) { $0 + $1.1 }) / 2
+            var cumulative = 0
+            for value in sorted {
+                cumulative += value.1
+                if Double(cumulative) >= target { return value.0 }
+            }
+            return sorted.last?.0
         }
 
         private func managedDetails(_ report: SkillsRoiReport) -> [SkillInspectorDetail] {
@@ -1339,6 +1489,7 @@
 
     private struct SkillHealthSheet: View {
         @Environment(\.dismiss) private var dismiss
+        @Environment(\.theme) private var theme
         let detail: SkillInspectorDetail
         let report: SkillsRoiReport?
 
@@ -1349,9 +1500,19 @@
                         healthSection(skillsText("health_summary", "四维体检概览")) {
                             HStack {
                                 healthMetric("\(detail.loads30d)", skillsText("calls_30d", "30天调用"))
-                                healthMetric(detail.scripts.compactMap(\.p95Ms).min().map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), skillsText("script", "脚本"))
+                                healthMetric(SkillsRoiDiagnosticsCardView.aggregateScriptP95(detail.scripts).map { "\(Int($0))ms" } ?? skillsText("unknown", "未知"), skillsText("script_p95_median", "P95 中位"))
                                 healthMetric(detail.r1PassRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知"), skillsText("quality", "质量"))
                                 healthMetric("\(detail.editChurn)", skillsText("changes", "变动"))
+                            }
+                            if let behavior = report?.qualityBehavior?.first(where: { $0.skill == detail.skill }) {
+                                Text("\(skillsText("observed", "观测调用")) \(behavior.observedInvocations ?? 0) · \(skillsText("corrections", "纠正")) \(behavior.correctionCount ?? 0) · \(skillsText("active_duration", "活跃耗时")) \(behavior.activeDurationMedianSec.map { String(format: "%.1fm", $0 / 60) } ?? skillsText("unknown", "未知"))")
+                                    .font(.caption)
+                                    .foregroundStyle(theme.text(.body))
+                            }
+                            if let evolution = report?.versionEvolution.first(where: { $0.skill == detail.skill }) {
+                                Text(skillsText("version_comparison", "版本对比") + " " + SkillsRoiDiagnosticsCardView.formatVersionComparison(before: evolution.beforeVersion?.combinedVersion, current: evolution.combinedVersion))
+                                    .font(.caption)
+                                    .foregroundStyle(theme.text(.body))
                             }
                         }
                         healthSection(skillsText("health_scripts", "名下脚本")) {
@@ -1359,26 +1520,35 @@
                                 HStack {
                                     Text(script.relPath.split(separator: "/").last.map(String.init) ?? script.relPath)
                                     Spacer()
-                                    Text("\(script.calls30d ?? 0) · " + (script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")))
-                                        .foregroundStyle(.secondary)
+                                    Text("\(script.calls30d ?? 0) · " + (script.successRate.map { "\(Int($0 * 100))%" } ?? skillsText("unknown", "未知")) + " · " + (script.p95Ms.map { "\(Int($0))ms" } ?? skillsText("unknown", "未知")))
+                                        .foregroundStyle(theme.text(.body))
                                 }
                             }
                         }
                         healthSection(skillsText("health_documents", "说明与参考文档")) {
                             Text("\(detail.skillMdLines) " + skillsText("lines", "行") + " · \(detail.bodyTokensEst) " + skillsText("words", "词"))
-                            Text("\(detail.references.count) " + skillsText("references", "份参考") + " · \(detail.unhitRefsCount) " + skillsText("unhit_refs", "未命中"))
-                                .foregroundStyle(.secondary)
+                            Text("\(detail.references.count - detail.unhitRefsCount)/\(detail.references.count) " + skillsText("reference_hit", "参考命中") + " · \(detail.unhitRefsCount) " + skillsText("redundancy", "冗余"))
+                                .foregroundStyle(theme.text(.body))
+                            ForEach(detail.references) { reference in
+                                Text((reference.isUnhit ? skillsText("reference_unhit", "未命中") : skillsText("reference_hit_status", "已命中")) + " · " + (reference.relPath.split(separator: "/").last.map(String.init) ?? reference.relPath))
+                                    .font(.caption2)
+                                    .foregroundStyle(theme.text(.body))
+                            }
                         }
                         healthSection(skillsText("health_quality", "Eval 与优化建议")) {
-                            Text("\(detail.evalCases.count) " + skillsText("eval_cases", "条用例") + " · \(detail.evalInterceptions) " + skillsText("interceptions", "拦截"))
-                            Text(detail.implBugEscapes + detail.specGapEscapes > 0
-                                ? skillsText("diagnosis_quality", "有质量信号需要排查")
-                                : skillsText("diagnosis_healthy", "当前运行状态稳定"))
-                                .foregroundStyle(.secondary)
+                            Text("\(detail.evalCases.count) " + skillsText("eval_cases", "条用例") + " · \(detail.evalInterceptions) " + skillsText("interceptions", "拦截") + " · \(detail.evalEscapes) " + skillsText("escapes", "漏检"))
+                                .foregroundStyle(theme.text(.body))
+                            ForEach(detail.evalCases) { evalCase in
+                                Text("\(evalCase.title) · \(evalCase.status) · \(evalCase.interceptions30d)/\(evalCase.escapes30d)")
+                                    .font(.caption)
+                                    .foregroundStyle(theme.text(.body))
+                            }
+                            Text(optimizationGuidance(detail: detail))
+                                .foregroundStyle(theme.text(.body))
                             if let judge = report?.qualityJudge?.skills.first(where: { $0.skill == detail.skill }),
                                let score = judge.scoreMean {
                                 Text(skillsText("score", "评分") + " \(String(format: "%.1f", score))")
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(theme.text(.body))
                             }
                         }
                     }
@@ -1401,7 +1571,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+            .background(theme.neutrals.inner.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
         }
 
         private func healthMetric(_ value: String, _ label: String) -> some View {
@@ -1410,6 +1580,19 @@
                 Text(label).font(.caption2).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        private func optimizationGuidance(detail: SkillInspectorDetail) -> String {
+            if detail.evalEscapes > 0 || detail.implBugEscapes + detail.specGapEscapes > 0 {
+                return skillsText("guidance_quality", "先补齐失败用例，再复核最近的质量信号。")
+            }
+            if detail.scripts.contains(where: { ($0.successRate ?? 1) < 0.9 }) {
+                return skillsText("guidance_script", "优先检查失败率较高的脚本，并补一条回归用例。")
+            }
+            if detail.unhitRefsCount > 0 {
+                return skillsText("guidance_references", "优先清理长期未命中的参考文档，保留常用内容。")
+            }
+            return skillsText("guidance_healthy", "当前没有明显风险，保持现有检查节奏。")
         }
     }
 
