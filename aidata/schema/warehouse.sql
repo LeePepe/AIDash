@@ -589,3 +589,49 @@ CREATE TABLE IF NOT EXISTS fact_quality_judge_run (
     status TEXT NOT NULL,
     exclusion_reasons TEXT
 );
+
+-- ---------------------------------------------------------------------------
+-- Agent-retro 6-layer trajectory findings & long-horizon waste facts.
+-- Opt-in from clean/agent_retro.db; CST calendar day is materialized via
+-- STORED generated column (+8 hours), never host-dependent localtime.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fact_agent_retro_finding (
+    finding_uid TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    goal_id TEXT,
+    role_key TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    layer_key TEXT NOT NULL CHECK(layer_key IN ('role', 'handoff', 'invoke', 'exec', 'friction', 'horizon')),
+    finding_code TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    skill_version TEXT,
+    is_post_fix INTEGER NOT NULL CHECK(is_post_fix IN (0, 1)),
+    occurrence_count INTEGER NOT NULL CHECK(occurrence_count >= 0),
+    ts TEXT NOT NULL,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_agent_retro_finding_cst_day
+    ON fact_agent_retro_finding(cst_day);
+CREATE INDEX IF NOT EXISTS idx_agent_retro_finding_layer_skill
+    ON fact_agent_retro_finding(layer_key, skill, is_post_fix);
+
+CREATE TABLE IF NOT EXISTS fact_agent_horizon_waste (
+    waste_uid TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    role_key TEXT NOT NULL,
+    skill TEXT NOT NULL,
+    horizon_code TEXT NOT NULL,
+    category_key TEXT NOT NULL,
+    wasted_turns INTEGER NOT NULL CHECK(wasted_turns >= 0),
+    wasted_tokens INTEGER NOT NULL CHECK(wasted_tokens >= 0),
+    duration_sec REAL NOT NULL CHECK(duration_sec >= 0),
+    ts TEXT NOT NULL,
+    cst_day TEXT GENERATED ALWAYS AS (date(ts, '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_agent_horizon_waste_cst_day
+    ON fact_agent_horizon_waste(cst_day);
+CREATE INDEX IF NOT EXISTS idx_agent_horizon_waste_skill_role
+    ON fact_agent_horizon_waste(skill, role_key);
+
