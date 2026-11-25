@@ -134,8 +134,8 @@ cp aidata/scripts/aidata_digest_run.sh ~/.hermes/scripts/aidata_digest_run.sh
 
 ## Skill quality gap pipeline
 
-`quality_contracts.py` is the canonical contract for the explicit 25-skill
-registry (including `aidash-content`), aliases, closed correction classes,
+`quality_contracts.py` is the canonical contract for the explicit 26-skill
+registry (including `agent-retro` and `aidash-content`), aliases, closed correction classes,
 30-minute correction/observation horizon, 900-second active-gap cap, coverage
 states, and privacy-safe hashes. `adapters/quality_behavior.py` is an explicit
 read-only L1/L2 projection seam; it is not in `SOURCES` and is never launched
@@ -158,6 +158,19 @@ abstentions, malformed output, timeouts, and missing evidence never become
 zero scores. The normal L5 snapshot loads both quality sections from the
 warehouse, while behavior collection/normalization requires the explicit
 `./cli.py quality-behavior collect|normalize` command and is not scheduled.
+
+## Agent-retro 6-layer trajectory & horizon pipeline
+
+`adapters/agent_retro.py` is an opt-in, bounded L1/L2 projection (not in
+`SOURCES` or scheduled cron) that writes privacy-safe metadata (`retro_finding`
+and `horizon_waste` tables) into `clean/agent_retro.db` without persisting raw
+prompts, transcripts, or path secrets. L3 merges `clean/agent_retro.db` into
+`fact_agent_retro_finding` (6 layers: `role|handoff|invoke|exec|friction|horizon`
+with `vN@sha` `is_post_fix` watermarks) and `fact_agent_horizon_waste` (both
+carrying `STORED` `+8 hours` `cst_day` columns). L4 serves exploratory rolling
+CST queries (`retro/agent_retro_six_layer` and `retro/agent_horizon_waste`),
+and L5 emits plain-language `agent_retro` fields in `agent-efficiency.json` plus
+`agent_retro_watermarks` enrichment in `skills-roi.json` (`docs/metrics/agent-retro.md`).
 
 ## 与 local_git 源的自指
 

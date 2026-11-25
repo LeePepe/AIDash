@@ -296,6 +296,128 @@ def _merge_quality_facts(conn: sqlite3.Connection) -> dict[str, int]:
     return counts
 
 
+_VALID_AGENT_RETRO_LAYERS = frozenset({"role", "handoff", "invoke", "exec", "friction", "horizon"})
+
+
+def _merge_agent_retro_facts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Merge optional clean/agent_retro.db into warehouse facts without recollecting."""
+    if conn.in_transaction:
+        conn.commit()
+    counts = {
+        "fact_agent_retro_finding": 0,
+        "fact_agent_horizon_waste": 0,
+    }
+    retro_db = clean_path("agent_retro")
+    if not retro_db.exists():
+        return counts
+
+    conn.execute("ATTACH DATABASE ? AS agent_retro", (str(retro_db),))
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM agent_retro.sqlite_master WHERE type='table'"
+            )
+        }
+        if "retro_finding" in tables:
+            columns = [row[1] for row in conn.execute("PRAGMA agent_retro.table_info(retro_finding)")]
+            rows = [dict(zip(columns, values)) for values in conn.execute("SELECT * FROM agent_retro.retro_finding")]
+            target_columns = [
+                "finding_uid",
+                "source",
+                "session_id",
+                "goal_id",
+                "role_key",
+                "skill",
+                "layer_key",
+                "finding_code",
+                "severity",
+                "skill_version",
+                "is_post_fix",
+                "occurrence_count",
+                "ts",
+            ]
+            valid_findings = []
+            for row in rows:
+                layer = str(row.get("layer_key") or "").strip().lower()
+                if layer not in _VALID_AGENT_RETRO_LAYERS or not row.get("finding_uid") or not row.get("ts"):
+                    continue
+                is_post = 1 if int(row.get("is_post_fix") or 0) else 0
+                occ = max(0, int(row.get("occurrence_count") or 0))
+                valid_findings.append((
+                    str(row["finding_uid"]),
+                    str(row.get("source") or "agent_retro"),
+                    str(row.get("session_id") or "sess:anon"),
+                    str(row["goal_id"]) if row.get("goal_id") not in (None, "") else None,
+                    str(row.get("role_key") or "writer"),
+                    str(row.get("skill") or "unmeasured"),
+                    layer,
+                    str(row.get("finding_code") or f"{layer}_finding"),
+                    str(row.get("severity") or "medium"),
+                    str(row["skill_version"]) if row.get("skill_version") not in (None, "") else None,
+                    is_post,
+                    occ,
+                    str(row["ts"]),
+                ))
+            if valid_findings:
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO fact_agent_retro_finding ({', '.join(target_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in target_columns)})",
+                    valid_findings,
+                )
+            counts["fact_agent_retro_finding"] = conn.execute(
+                "SELECT count(*) FROM fact_agent_retro_finding"
+            ).fetchone()[0]
+
+        if "horizon_waste" in tables:
+            columns = [row[1] for row in conn.execute("PRAGMA agent_retro.table_info(horizon_waste)")]
+            rows = [dict(zip(columns, values)) for values in conn.execute("SELECT * FROM agent_retro.horizon_waste")]
+            target_columns = [
+                "waste_uid",
+                "source",
+                "session_id",
+                "role_key",
+                "skill",
+                "horizon_code",
+                "category_key",
+                "wasted_turns",
+                "wasted_tokens",
+                "duration_sec",
+                "ts",
+            ]
+            valid_waste = []
+            for row in rows:
+                if not row.get("waste_uid") or not row.get("ts"):
+                    continue
+                valid_waste.append((
+                    str(row["waste_uid"]),
+                    str(row.get("source") or "agent_retro"),
+                    str(row.get("session_id") or "sess:anon"),
+                    str(row.get("role_key") or "writer"),
+                    str(row.get("skill") or "unmeasured"),
+                    str(row.get("horizon_code") or "HZN1_context_carry_tax"),
+                    str(row.get("category_key") or "context_carry"),
+                    max(0, int(row.get("wasted_turns") or 0)),
+                    max(0, int(row.get("wasted_tokens") or 0)),
+                    max(0.0, float(row.get("duration_sec") or 0.0)),
+                    str(row["ts"]),
+                ))
+            if valid_waste:
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO fact_agent_horizon_waste ({', '.join(target_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in target_columns)})",
+                    valid_waste,
+                )
+            counts["fact_agent_horizon_waste"] = conn.execute(
+                "SELECT count(*) FROM fact_agent_horizon_waste"
+            ).fetchone()[0]
+    finally:
+        if conn.in_transaction:
+            conn.commit()
+        conn.execute("DETACH DATABASE agent_retro")
+    return counts
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -315,6 +437,7 @@ def run_merge() -> dict[str, int]:
             "SELECT count(*) FROM dim_automation_rule"
         ).fetchone()[0]
         counts.update(_merge_quality_facts(conn))
+        counts.update(_merge_agent_retro_facts(conn))
 
         # --- P0 GTT dimensions/facts ---
         if _attach(conn, "gtt_ledger", "gl"):

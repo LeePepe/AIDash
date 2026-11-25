@@ -40,10 +40,11 @@ JUDGE_COMPONENT_MAX = 3.0
 MAX_PREVIEW_CHARS = 500
 MAX_JUDGE_OUTPUT_BYTES = 64 * 1024
 
-# Twenty-four user skill packages plus the repository-local aidash-content
+# Twenty-five user skill packages plus the repository-local aidash-content
 # package. Keep this explicit: filesystem discovery is evidence, not the
 # denominator used by the product contract.
 ACTIVE_SKILLS: tuple[str, ...] = (
+    "agent-retro",
     "aidash-content",
     "aidash-metrics",
     "asset-screener",

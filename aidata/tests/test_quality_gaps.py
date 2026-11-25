@@ -70,9 +70,10 @@ def _records():
 
 
 def test_registry_is_explicit_and_aliases_do_not_change_denominator():
-    assert len(ACTIVE_SKILLS) == 25
+    assert len(ACTIVE_SKILLS) == 26
+    assert "agent-retro" in ACTIVE_SKILLS
     assert "aidash-content" in ACTIVE_SKILLS
-    assert len(registry_rows()) == 25
+    assert len(registry_rows()) == 26
     records = _records()
     records.append({**records[0], "event_id": 4})
     normalized = normalize_behavior_records(records)
@@ -177,7 +178,7 @@ def test_assistant_only_invocation_is_not_eligible_or_satisfied():
 def test_behavior_snapshot_keeps_all_skills_and_missing_evidence_null():
     normalized = normalize_behavior_records(_records())
     snapshot = build_behavior_snapshot(normalized, now=NOW)
-    assert len(snapshot["skills"]) == 25
+    assert len(snapshot["skills"]) == 26
     team_lead = next(row for row in snapshot["skills"] if row["skill"] == "team-lead")
     idle = next(row for row in snapshot["skills"] if row["skill"] == "workflow-hub")
     assert team_lead["eligible"] is True

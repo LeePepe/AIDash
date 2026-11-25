@@ -8,6 +8,7 @@ WITH anchor AS (
 ),
 valid_skills(skill) AS (
     VALUES
+        ('agent-retro'),
         ('aidash-content'),
         ('aidash-metrics'),
         ('asset-screener'),
