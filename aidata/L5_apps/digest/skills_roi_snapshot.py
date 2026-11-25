@@ -26,6 +26,7 @@ from typing import Any
 import config
 import serve
 from config import ICLOUD_DRIVE_ROOT, resolve_icloud_sync_dir
+from L5_apps.digest.agent_efficiency_snapshot import load_skill_watermarks_from_warehouse
 from L5_apps.digest.quality_snapshot import load_snapshot_from_warehouse
 from timeutil import CST
 
@@ -60,6 +61,7 @@ _PSEUDO_SKILL_DENYLIST = frozenset({
     "p1", "api", "screenshots", "ios", "activeworkout", "strata", "loading",
 })
 _CANONICAL_SKILL_ALLOWLIST = frozenset({
+    "agent-retro",
     "aidash-content",
     "aidash-metrics",
     "asset-screener",
@@ -217,6 +219,7 @@ def _synthesize_skill_retro_summary(
     *,
     prior_skill_retro: Mapping[str, Any] | None = None,
     use_prior_fallback: bool = False,
+    agent_retro_watermarks: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Ensure standardized 4-layer `skill_retro` health object (`summary`, `layer0..layer3`, `proposals`)."""
     existing = report.get("skill_retro") if isinstance(report.get("skill_retro"), Mapping) else (
@@ -234,6 +237,14 @@ def _synthesize_skill_retro_summary(
     ):
         synthesized = dict(existing)
         synthesized.setdefault("proposals", list(existing.get("proposals") or report.get("low_roi_proposals") or []))
+        if agent_retro_watermarks is not None:
+            synthesized["agent_retro_watermarks"] = [
+                dict(w) for w in agent_retro_watermarks if isinstance(w, Mapping)
+            ]
+        elif isinstance(existing.get("agent_retro_watermarks"), list):
+            synthesized["agent_retro_watermarks"] = [
+                dict(w) for w in existing["agent_retro_watermarks"] if isinstance(w, Mapping)
+            ]
         return synthesized
 
     evo_list = list(version_evolution or report.get("skill_version_evolution") or [])
@@ -357,7 +368,7 @@ def _synthesize_skill_retro_summary(
         "observation_pool_count": 0,
         "slow_flywheel_ready": True,
     }
-    return {
+    res_retro = {
         "ok": bool(report.get("ok")),
         "schema": "aidash-skill-retro/v1",
         "query_id": "retro/skill_roi_diagnostics",
@@ -375,6 +386,11 @@ def _synthesize_skill_retro_summary(
         "layer3_wild_patterns_and_eval": layer3,
         "proposals": proposals_list,
     }
+    if agent_retro_watermarks is not None:
+        res_retro["agent_retro_watermarks"] = [
+            dict(w) for w in agent_retro_watermarks if isinstance(w, Mapping)
+        ]
+    return res_retro
 
 
 def _parse_iso_timestamp(value: Any) -> datetime | None:
@@ -1897,11 +1913,34 @@ def build_snapshot(
 
     prior_retro = (prior_snapshot or {}).get("skill_retro") if isinstance(prior_snapshot, Mapping) else None
     use_prior_fallback = bool(problems) or report.get("ok") is not True
+    wm_list: list[dict[str, Any]] | None = None
+    if isinstance(report.get("agent_retro_watermarks"), list):
+        wm_list = [
+            dict(w)
+            for w in report["agent_retro_watermarks"]
+            if isinstance(w, Mapping) and _is_valid_registered_skill(w.get("skill"), skills_repo=skills_repo)
+        ]
+    elif eff_wh is not None:
+        loaded_wm, wm_present = load_skill_watermarks_from_warehouse(eff_wh)
+        if wm_present:
+            wm_list = [
+                w
+                for w in loaded_wm
+                if _is_valid_registered_skill(w.get("skill"), skills_repo=skills_repo)
+            ]
+    elif isinstance(prior_retro, Mapping) and isinstance(prior_retro.get("agent_retro_watermarks"), list):
+        wm_list = [
+            dict(w)
+            for w in prior_retro["agent_retro_watermarks"]
+            if isinstance(w, Mapping) and _is_valid_registered_skill(w.get("skill"), skills_repo=skills_repo)
+        ]
+
     payload["skill_retro"] = _synthesize_skill_retro_summary(
         report,
         payload["skill_version_evolution"],
         prior_skill_retro=prior_retro if isinstance(prior_retro, Mapping) else None,
         use_prior_fallback=use_prior_fallback,
+        agent_retro_watermarks=wm_list,
     )
     if problems:
         payload["errors"] = problems

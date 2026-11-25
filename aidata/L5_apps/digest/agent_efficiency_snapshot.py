@@ -15,14 +15,16 @@ import argparse
 import contextlib
 import json
 import os
+import sqlite3
 import subprocess  # nosec B404 - fixed python helper only
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import config
 import serve
 from config import ICLOUD_DRIVE_ROOT, resolve_icloud_sync_dir
 
@@ -35,8 +37,18 @@ def _l4_daily_query() -> str:
     return "retro/" + "daily_agent_efficiency"
 
 
+def _l4_six_layer_query() -> str:
+    return "retro/" + "agent_retro_six_layer"
+
+
+def _l4_horizon_waste_query() -> str:
+    return "retro/" + "agent_horizon_waste"
+
+
 ROLE_QUERY = _l4_role_query()
 DAILY_QUERY = _l4_daily_query()
+SIX_LAYER_QUERY = _l4_six_layer_query()
+HORIZON_WASTE_QUERY = _l4_horizon_waste_query()
 
 _DEFAULT_OUTPUT = (
     Path.home()
@@ -70,6 +82,264 @@ _ROLE_LABELS_ZH: dict[str, str] = {
     "explorer": "代码探查 (Explorer)",
     "pr_monitor": "交付监控 (PR Monitor)",
 }
+
+_AGENT_RETRO_LAYERS_META: tuple[tuple[str, str, str], ...] = (
+    ("role", "角色边界", "Role Boundaries"),
+    ("handoff", "交接完整度", "Handoff Completeness"),
+    ("invoke", "工具与参考调用", "Tool & Reference Invocation"),
+    ("exec", "执行与返工收敛", "Execution & Rework Convergence"),
+    ("friction", "人机协作摩擦", "Human-Agent Collaboration Friction"),
+    ("horizon", "长程上下文损耗", "Long-Horizon Context Waste"),
+)
+
+_HORIZON_CATEGORY_LABELS: dict[str, tuple[str, str]] = {
+    "context_carry": ("未引用重输出残留", "Unreferenced Context Carry"),
+    "wakeup_parallelism": ("唤醒延迟与串行排队", "Wakeup Lag & Serial Queueing"),
+    "rework_verify": ("返工绕路与过早全量验证", "Rework Detours & Early Full Verify"),
+    "fatigue_inflection": ("长程疲劳失焦拐点", "Long-Session Fatigue Inflection"),
+    "steering_overkill": ("高阶模型机械轮询", "High-Tier Model Mechanical Polling"),
+}
+
+
+def _classify_watermark_status(pre_fix_count: int, post_fix_count: int, skill_version: str | None) -> str:
+    if post_fix_count > 0 and pre_fix_count > 0:
+        return "regressed" if post_fix_count >= pre_fix_count else "observing"
+    if post_fix_count > 0:
+        return "regressed"
+    if pre_fix_count > 0 and post_fix_count == 0:
+        return "improved"
+    return "baseline" if skill_version else "observing"
+
+
+def load_skill_watermarks_from_warehouse(
+    warehouse_db: Path | None,
+    *,
+    until_day: str | None = None,
+    days: int = 30,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Read per-skill vN@sha pre_fix vs post_fix watermarks from fact_agent_retro_finding."""
+    if warehouse_db is None or not warehouse_db.is_file():
+        return [], False
+    try:
+        with contextlib.closing(
+            sqlite3.connect(f"file:{warehouse_db.resolve()}?mode=ro", uri=True)
+        ) as conn:
+            tables = {
+                str(r[0])
+                for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if "fact_agent_retro_finding" not in tables:
+                return [], False
+            anchor_sql = """
+            WITH anchor AS (
+                SELECT COALESCE(
+                    :until_day,
+                    (SELECT MAX(f.cst_day) FROM fact_agent_retro_finding AS f WHERE f.cst_day IS NOT NULL),
+                    date('now', '+8 hours')
+                ) AS end_day
+            )
+            SELECT
+                f.skill,
+                MAX(f.skill_version) AS skill_version,
+                SUM(CASE WHEN f.is_post_fix = 0 THEN f.occurrence_count ELSE 0 END) AS pre_fix_count,
+                SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END) AS post_fix_count,
+                MAX(f.cst_day) AS source_as_of
+            FROM fact_agent_retro_finding AS f
+            CROSS JOIN anchor AS a
+            WHERE f.cst_day >= date(a.end_day, '-' || (:days - 1) || ' days')
+              AND f.cst_day <= a.end_day
+            GROUP BY f.skill
+            ORDER BY SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END) DESC,
+                     SUM(f.occurrence_count) DESC,
+                     f.skill ASC
+            """
+            rows = conn.execute(
+                anchor_sql,
+                {"until_day": until_day, "days": max(1, int(days))},
+            ).fetchall()
+    except (OSError, sqlite3.Error):
+        return [], False
+
+    watermarks: list[dict[str, Any]] = []
+    for skill, skill_ver, pre_cnt, post_cnt, as_of in rows:
+        sk = str(skill or "").strip()
+        if not sk:
+            continue
+        pre_i = max(0, int(pre_cnt or 0))
+        post_i = max(0, int(post_cnt or 0))
+        sv_s = str(skill_ver).strip() if skill_ver not in (None, "") else None
+        watermarks.append({
+            "skill": sk,
+            "skill_version": sv_s,
+            "pre_fix_count": pre_i,
+            "post_fix_count": post_i,
+            "status": _classify_watermark_status(pre_i, post_i, sv_s),
+            "source_as_of": str(as_of) if as_of else None,
+        })
+    return watermarks, True
+
+
+def build_agent_retro_section(
+    layer_rows: Iterable[Mapping[str, Any]] | None = None,
+    horizon_rows: Iterable[Mapping[str, Any]] | None = None,
+    skill_watermarks: Iterable[Mapping[str, Any]] | None = None,
+    *,
+    table_present: bool = True,
+    window_cst: str = "14d",
+) -> dict[str, Any]:
+    """Build backward-compatible plain-language `agent_retro` payload section."""
+    l_list = [dict(r) for r in (layer_rows or []) if isinstance(r, Mapping)]
+    h_list = [dict(r) for r in (horizon_rows or []) if isinstance(r, Mapping)]
+    wm_list = [dict(r) for r in (skill_watermarks or []) if isinstance(r, Mapping)]
+
+    by_layer = {str(r.get("layer_key") or "").strip(): r for r in l_list}
+    layers_out: list[dict[str, Any]] = []
+    pre_fix_total = 0
+    post_fix_total = 0
+    sample_candidates: list[int] = []
+    as_of_candidates: list[str] = []
+
+    for layer_key, label_zh, label_en in _AGENT_RETRO_LAYERS_META:
+        src = by_layer.get(layer_key, {})
+        pre_c = max(0, int(src.get("pre_fix_count") or 0))
+        post_c = max(0, int(src.get("post_fix_count") or 0))
+        tot_c = max(pre_c + post_c, int(src.get("total_occurrences") or 0))
+        aff_s = max(0, int(src.get("affected_sessions") or 0))
+        pre_fix_total += pre_c
+        post_fix_total += post_c
+        if src.get("sample_size") is not None:
+            sample_candidates.append(max(0, int(src.get("sample_size") or 0)))
+        if src.get("source_as_of"):
+            as_of_candidates.append(str(src["source_as_of"]))
+        rkey = str(src.get("top_role_key") or "").strip() or None
+        layers_out.append({
+            "layer_key": layer_key,
+            "label_zh": label_zh,
+            "label_en": label_en,
+            "pre_fix_count": pre_c,
+            "post_fix_count": post_c,
+            "total_count": tot_c,
+            "affected_sessions": aff_s,
+            "top_role_key": rkey,
+            "top_role_label_zh": _ROLE_LABELS_ZH.get(rkey, rkey) if rkey else None,
+            "top_role_label_en": _ROLE_LABELS_EN.get(rkey, rkey) if rkey else None,
+            "top_skill": str(src.get("top_skill") or "").strip() or None,
+            "top_skill_version": str(src.get("top_skill_version") or "").strip() or None,
+        })
+
+    horizon_items: list[dict[str, Any]] = []
+    wasted_turns_total = 0
+    wasted_tokens_total = 0
+    for hrow in h_list:
+        cat_key = str(hrow.get("category_key") or "context_carry").strip()
+        zh_lbl, en_lbl = _HORIZON_CATEGORY_LABELS.get(
+            cat_key,
+            ("长程上下文损耗", "Long-Horizon Context Waste"),
+        )
+        w_turns = max(0, int(hrow.get("wasted_turns") or 0))
+        w_toks = max(0, int(hrow.get("wasted_tokens") or 0))
+        dur = round(max(0.0, float(hrow.get("duration_sec") or 0.0)), 1)
+        rkey = str(hrow.get("role_key") or "writer").strip()
+        wasted_turns_total += w_turns
+        wasted_tokens_total += w_toks
+        if hrow.get("sample_size") is not None:
+            sample_candidates.append(max(0, int(hrow.get("sample_size") or 0)))
+        if hrow.get("source_as_of"):
+            as_of_candidates.append(str(hrow["source_as_of"]))
+        horizon_items.append({
+            "category_key": cat_key,
+            "label_zh": zh_lbl,
+            "label_en": en_lbl,
+            "role_key": rkey,
+            "role_label_zh": _ROLE_LABELS_ZH.get(rkey, rkey),
+            "role_label_en": _ROLE_LABELS_EN.get(rkey, rkey),
+            "skill": str(hrow.get("skill") or "unmeasured"),
+            "wasted_turns": w_turns,
+            "wasted_tokens": w_toks,
+            "duration_sec": dur,
+            "token_share_pct": round(float(hrow.get("token_share_pct") or 0.0), 2),
+        })
+
+    if not wm_list and l_list:
+        inferred_wm: dict[str, dict[str, Any]] = {}
+        for lrow in l_list:
+            sk = str(lrow.get("top_skill") or "").strip()
+            if not sk:
+                continue
+            pre_c = max(0, int(lrow.get("pre_fix_count") or 0))
+            post_c = max(0, int(lrow.get("post_fix_count") or 0))
+            sv = str(lrow.get("top_skill_version") or "").strip() or None
+            cur = inferred_wm.setdefault(
+                sk,
+                {"skill": sk, "skill_version": sv, "pre_fix_count": 0, "post_fix_count": 0},
+            )
+            cur["pre_fix_count"] += pre_c
+            cur["post_fix_count"] += post_c
+            if sv and not cur.get("skill_version"):
+                cur["skill_version"] = sv
+        for entry in inferred_wm.values():
+            entry["status"] = _classify_watermark_status(
+                entry["pre_fix_count"],
+                entry["post_fix_count"],
+                entry.get("skill_version"),
+            )
+            wm_list.append(entry)
+
+    watermarks_out: list[dict[str, Any]] = []
+    for wm in wm_list:
+        sk = str(wm.get("skill") or "").strip()
+        if not sk:
+            continue
+        pre_c = max(0, int(wm.get("pre_fix_count") or 0))
+        post_c = max(0, int(wm.get("post_fix_count") or 0))
+        sv = str(wm.get("skill_version") or "").strip() or None
+        st = str(wm.get("status") or "").strip() or _classify_watermark_status(pre_c, post_c, sv)
+        if wm.get("source_as_of"):
+            as_of_candidates.append(str(wm["source_as_of"]))
+        watermarks_out.append({
+            "skill": sk,
+            "skill_version": sv,
+            "pre_fix_count": pre_c,
+            "post_fix_count": post_c,
+            "status": st,
+        })
+
+    sample_size = max(sample_candidates) if sample_candidates else 0
+    if sample_size == 0 and (pre_fix_total + post_fix_total > 0 or horizon_items):
+        sample_size = max(1, len(horizon_items))
+    source_as_of = max(as_of_candidates) if as_of_candidates else None
+    eff_window_cst = (
+        str(l_list[0].get("window_cst"))
+        if l_list and l_list[0].get("window_cst")
+        else window_cst
+    )
+
+    if not table_present:
+        cov_status = "missing"
+    elif sample_size == 0 and pre_fix_total == 0 and post_fix_total == 0 and not horizon_items:
+        cov_status = "unknown"
+    elif (pre_fix_total + post_fix_total > 0) and not horizon_items:
+        cov_status = "partial"
+    elif horizon_items and (pre_fix_total + post_fix_total == 0):
+        cov_status = "partial"
+    else:
+        cov_status = "healthy"
+
+    return {
+        "coverage_status": cov_status,
+        "sample_size": sample_size,
+        "source_as_of": source_as_of,
+        "window_cst": eff_window_cst,
+        "pre_fix_total": pre_fix_total,
+        "post_fix_total": post_fix_total,
+        "layers": layers_out,
+        "horizon_waste": {
+            "wasted_turns_total": wasted_turns_total,
+            "wasted_tokens_total": wasted_tokens_total,
+            "items": horizon_items,
+        },
+        "skill_watermarks": watermarks_out,
+    }
 
 
 def _read_magpie_role_telemetry(
@@ -206,6 +476,7 @@ def build_agent_efficiency_snapshot(
     daily_rows: list[dict[str, Any]],
     *,
     magpie_telemetry: dict[str, Any] | None = None,
+    agent_retro: Mapping[str, Any] | None = None,
     errors: list[str] | None = None,
 ) -> dict[str, Any]:
     """Assemble schema_version=1 aidash-agent-efficiency snapshot dictionary."""
@@ -360,6 +631,9 @@ def build_agent_efficiency_snapshot(
         "round_distribution": round_summary,
         "daily_series": daily_out,
         "daily_trend": daily_out,
+        "agent_retro": dict(agent_retro)
+        if isinstance(agent_retro, Mapping)
+        else build_agent_retro_section(table_present=False),
     }
     if problems:
         payload["errors"] = problems
@@ -486,6 +760,7 @@ def write_snapshot(
     *,
     until_day: str | None = None,
     magpie_path: Path | None = _DEFAULT_MAGPIE_USAGE,
+    warehouse_db: Path | None = None,
     query_runner: Callable[..., tuple[list[tuple[Any, ...]], list[str]]] | None = None,
     icloud_sync_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -494,6 +769,9 @@ def write_snapshot(
     errors: list[str] = []
     role_dicts: list[dict[str, Any]] = []
     daily_dicts: list[dict[str, Any]] = []
+    six_layer_dicts: list[dict[str, Any]] = []
+    horizon_dicts: list[dict[str, Any]] = []
+    retro_table_present = True
 
     try:
         r_rows, r_cols = runner(ROLE_QUERY)
@@ -508,13 +786,53 @@ def write_snapshot(
     except Exception as exc:  # noqa: BLE001
         errors.append(f"{DAILY_QUERY} unavailable: {type(exc).__name__}")
 
+    retro_params = {"until_day": until_day} if until_day else None
+    try:
+        sl_rows, sl_cols = (
+            runner(SIX_LAYER_QUERY, retro_params)
+            if retro_params
+            else runner(SIX_LAYER_QUERY)
+        )
+        if sl_cols and "layer_key" in sl_cols:
+            six_layer_dicts = [dict(zip(sl_cols, vals)) for vals in sl_rows]
+        else:
+            retro_table_present = False
+    except Exception:  # noqa: BLE001 - optional opt-in table degrades without failing snapshot
+        retro_table_present = False
+
+    try:
+        hz_rows, hz_cols = (
+            runner(HORIZON_WASTE_QUERY, retro_params)
+            if retro_params
+            else runner(HORIZON_WASTE_QUERY)
+        )
+        if hz_cols and "category_key" in hz_cols:
+            horizon_dicts = [dict(zip(hz_cols, vals)) for vals in hz_rows]
+    except Exception:  # noqa: BLE001
+        pass
+
+    eff_wh = warehouse_db
+    if eff_wh is None and query_runner is None and not os.environ.get("PYTEST_CURRENT_TEST"):
+        eff_wh = config.WAREHOUSE_DB
+    wm_rows, wm_present = load_skill_watermarks_from_warehouse(eff_wh, until_day=until_day)
+    agent_retro_section = build_agent_retro_section(
+        six_layer_dicts,
+        horizon_dicts,
+        wm_rows,
+        table_present=(retro_table_present or wm_present),
+    )
+
     w_start = str(daily_dicts[0]["cst_day"]) if daily_dicts else None
     w_end = str(daily_dicts[-1]["cst_day"]) if daily_dicts else None
     magpie = _read_magpie_role_telemetry(
         magpie_path, window_start=w_start, window_end=w_end
     )
     payload = build_agent_efficiency_snapshot(
-        role_dicts, daily_dicts, magpie_telemetry=magpie, errors=errors
+        role_dicts,
+        daily_dicts,
+        magpie_telemetry=magpie,
+        agent_retro=agent_retro_section,
+        errors=errors,
     )
 
     output.parent.mkdir(parents=True, exist_ok=True)
