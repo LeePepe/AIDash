@@ -2468,11 +2468,76 @@ struct DashboardWorkspaceTests {
         // Pseudo-skill "tests" filtered out automatically
         #expect(retro.skillWatermarks.map(\.skill) == ["m2-dispatcher", "agent-retro"])
 
-        // 3. SkillsPseudoSkillGuard scrubs S1..S12, M1..M5, L0..L3, R1..R4, H1..H5, HZN1..HZN5
+        // 3. SkillsPseudoSkillGuard scrubs S1..S12, M1..M5, L0..L3, R1..R4, H1..H5, HZN1..HZN5 while preserving hyphenated slugs
         let scrubbed = SkillsPseudoSkillGuard.scrubAcademicCodes(
-            "S10 M2 L2 R1_m3 R2 H1_handoff H4 HZN1 HZN5_polling plain summary"
+            "S10 M2 L2 R1_m3 R2 H1_handoff H4 HZN1 HZN5_polling m2-dispatcher plain summary"
         )
-        #expect(scrubbed == "plain summary")
+        #expect(scrubbed == "m2-dispatcher plain summary")
+
+        // 3b. Warehouse fallback enforces 14d CST window on findings/horizon, 30d on watermarks, and degrades to error on malformed schema
+        let retroWhHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-retro-wh-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: retroWhHome) }
+        let retroWhDir = retroWhHome.appendingPathComponent("Development/AIDash/aidata/L3_merge", isDirectory: true)
+        try FileManager.default.createDirectory(at: retroWhDir, withIntermediateDirectories: true)
+        let retroWhURL = retroWhDir.appendingPathComponent("warehouse.db")
+        var retroDB: OpaquePointer?
+        #expect(sqlite3_open(retroWhURL.path, &retroDB) == SQLITE_OK)
+        if let retroDB {
+            let sql = """
+            CREATE TABLE fact_agent_retro_finding (
+                finding_uid TEXT PRIMARY KEY, session_id TEXT, role_key TEXT, skill TEXT,
+                layer_key TEXT, skill_version TEXT, is_post_fix INTEGER, occurrence_count INTEGER, cst_day TEXT
+            );
+            CREATE TABLE fact_agent_horizon_waste (
+                waste_uid TEXT PRIMARY KEY, session_id TEXT, role_key TEXT, skill TEXT,
+                category_key TEXT, wasted_turns INTEGER, wasted_tokens INTEGER, duration_sec REAL, cst_day TEXT
+            );
+            INSERT INTO fact_agent_retro_finding VALUES ('old-f', 's-old', 'm2', 'm2-dispatcher', 'role', 'v4@old', 0, 99, '2026-10-01');
+            INSERT INTO fact_agent_retro_finding VALUES ('wm-f', 's-wm', 'm2', 'm2-dispatcher', 'role', 'v5@abc1234', 0, 4, '2026-11-05');
+            INSERT INTO fact_agent_retro_finding VALUES ('cur-f', 's-cur', 'explorer', 'agent-retro', 'invoke', 'v9@def5678', 1, 2, '2026-11-24');
+            INSERT INTO fact_agent_horizon_waste VALUES ('old-w', 's-old', 'm1', 'team-lead', 'context_carry', 50, 90000, 120.0, '2026-10-01');
+            INSERT INTO fact_agent_horizon_waste VALUES ('cur-w', 's-cur', 'm1', 'agent-retro', 'context_carry', 3, 9000, 20.0, '2026-11-24');
+            """
+            #expect(sqlite3_exec(retroDB, sql, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(retroDB)
+        }
+        let whFallback = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: retroWhHome)?.agentEfficiency?.agentRetro)
+        #expect(whFallback.coverageStatus == "healthy")
+        // Only 2026-11-24 is inside the 14d window [2026-11-11..2026-11-24]; 2026-10-01 (99) and 2026-11-05 (4) are excluded from 14d layers!
+        #expect(whFallback.preFixTotal == 0)
+        #expect(whFallback.postFixTotal == 2)
+        #expect(whFallback.horizonWaste.wastedTurnsTotal == 3)
+        #expect(whFallback.horizonWaste.wastedTokensTotal == 9_000)
+        // 2026-11-05 IS inside the 30d watermark window [2026-10-26..2026-11-24], while 2026-10-01 is excluded!
+        let wmMap = Dictionary(uniqueKeysWithValues: whFallback.skillWatermarks.map { ($0.skill, $0) })
+        #expect(wmMap["m2-dispatcher"]?.preFixCount == 4)
+
+        // Malformed horizon table -> coverageStatus == "error" instead of fabricated empty/partial
+        let brokenHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-retro-broken-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: brokenHome) }
+        let brokenWhDir = brokenHome.appendingPathComponent("Development/AIDash/aidata/L3_merge", isDirectory: true)
+        try FileManager.default.createDirectory(at: brokenWhDir, withIntermediateDirectories: true)
+        let brokenWhURL = brokenWhDir.appendingPathComponent("warehouse.db")
+        var brokenDB: OpaquePointer?
+        #expect(sqlite3_open(brokenWhURL.path, &brokenDB) == SQLITE_OK)
+        if let brokenDB {
+            let brokenSQL = """
+            CREATE TABLE fact_gtt_task_run (goal_uid TEXT, goal_id TEXT, task_id TEXT, role_name TEXT, round_no INTEGER, v5_verdict TEXT);
+            INSERT INTO fact_gtt_task_run VALUES ('m:g1', 'g1', 'T1', 'writer', 1, 'PASS');
+            CREATE TABLE fact_agent_retro_finding (
+                finding_uid TEXT PRIMARY KEY, session_id TEXT, role_key TEXT, skill TEXT,
+                layer_key TEXT, skill_version TEXT, is_post_fix INTEGER, occurrence_count INTEGER, cst_day TEXT
+            );
+            INSERT INTO fact_agent_retro_finding VALUES ('f1', 's1', 'm2', 'm2-dispatcher', 'role', 'v5@abc', 0, 2, '2026-11-24');
+            CREATE TABLE fact_agent_horizon_waste (broken_col INTEGER);
+            """
+            #expect(sqlite3_exec(brokenDB, brokenSQL, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(brokenDB)
+        }
+        let brokenRetro = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: brokenHome)?.agentEfficiency?.agentRetro)
+        #expect(brokenRetro.coverageStatus == "error")
 
         // 4. SkillsRoiReport decodes skill_retro.agent_retro_watermarks and surfaces cured roadblocks
         let skillsWatermarkJSON = """

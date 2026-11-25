@@ -1502,8 +1502,11 @@ struct TK3SnapshotRenderTests {
         let empty = AgentRetroWorkbenchSummary(coverageStatus: "unknown", sampleSize: 0, layers: layers)
         let degraded = AgentRetroWorkbenchSummary(coverageStatus: "missing", sampleSize: 0, layers: layers)
 
-        let forbiddenRegex = try NSRegularExpression(
-            pattern: #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?|python3|skill_contract\.py|skill_retro\.py|agent_retro\.py|session_id|SKILL\.md|inspector)\b"#,
+        let forbiddenCodeRegex = try NSRegularExpression(
+            pattern: #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
+        )
+        let forbiddenCLIWordRegex = try NSRegularExpression(
+            pattern: #"\b(?:python3|skill_contract\.py|skill_retro\.py|agent_retro\.py|session_id|SKILL\.md|inspector)\b"#,
             options: [.caseInsensitive]
         )
         let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-agent-retro-\(UUID().uuidString)", isDirectory: true)
@@ -1531,11 +1534,15 @@ struct TK3SnapshotRenderTests {
                 hosting.frame = NSRect(x: 0, y: 0, width: 960, height: 600)
                 hosting.layoutSubtreeIfNeeded()
                 let axText = collectAccessibilityStrings(from: hosting).joined(separator: " ")
-                let matches = forbiddenRegex.matches(
+                let codeMatches = forbiddenCodeRegex.matches(
                     in: axText,
                     range: NSRange(axText.startIndex..<axText.endIndex, in: axText)
                 )
-                #expect(matches.isEmpty, "Forbidden code leaked into AgentRetroTrajectoryPanelsView accessibility (\(name)): \(axText)")
+                let cliMatches = forbiddenCLIWordRegex.matches(
+                    in: axText,
+                    range: NSRange(axText.startIndex..<axText.endIndex, in: axText)
+                )
+                #expect(codeMatches.isEmpty && cliMatches.isEmpty, "Forbidden code leaked into AgentRetroTrajectoryPanelsView accessibility (\(name)): \(axText)")
             }
         }
     }

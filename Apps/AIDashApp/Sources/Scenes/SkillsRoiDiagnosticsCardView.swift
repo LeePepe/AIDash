@@ -2308,7 +2308,7 @@
         }
 
         public static func scrubAcademicCodes(_ raw: String) -> String {
-            let pattern = #"\b(?:S(?:1[0-2]|[1-9])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)\b"#
+            let pattern = #"\b(?:S(?:1[0-2]|[1-9])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
             guard let regex = try? NSRegularExpression(pattern: pattern) else { return raw }
             let range = NSRange(raw.startIndex ..< raw.endIndex, in: raw)
             var cleaned = regex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")

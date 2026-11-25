@@ -3003,13 +3003,16 @@ extension LiveDashboardTelemetryReader {
         ("horizon", "长程上下文损耗", "Long-Horizon Context Waste"),
     ]
 
-    private static func sqliteTableExists(_ db: OpaquePointer, name: String) -> Bool {
+    private static func sqliteTableExists(_ db: OpaquePointer, name: String) -> Bool? {
         let sql = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1;"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return false }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, (name as NSString).utf8String, -1, nil)
-        return sqlite3_step(stmt) == SQLITE_ROW
+        let rc = sqlite3_step(stmt)
+        if rc == SQLITE_ROW { return true }
+        if rc == SQLITE_DONE { return false }
+        return nil
     }
 
     private struct FallbackLayerStats {
@@ -3032,82 +3035,140 @@ extension LiveDashboardTelemetryReader {
     }
 
     private static func queryFallbackAgentRetro(db: OpaquePointer) -> AgentRetroWorkbenchSummary? {
-        let hasFindings = sqliteTableExists(db, name: "fact_agent_retro_finding")
-        let hasHorizon = sqliteTableExists(db, name: "fact_agent_horizon_waste")
+        let emptyLayers = fallbackRetroLayerMeta.map {
+            AgentRetroLayerRow(layerKey: $0.key, labelZh: $0.zh, labelEn: $0.en)
+        }
+        guard let hasFindings = sqliteTableExists(db, name: "fact_agent_retro_finding"),
+              let hasHorizon = sqliteTableExists(db, name: "fact_agent_horizon_waste") else {
+            return AgentRetroWorkbenchSummary(coverageStatus: "error", sampleSize: 0, layers: emptyLayers)
+        }
         guard hasFindings || hasHorizon else {
-            let emptyLayers = fallbackRetroLayerMeta.map {
-                AgentRetroLayerRow(layerKey: $0.key, labelZh: $0.zh, labelEn: $0.en)
-            }
             return AgentRetroWorkbenchSummary(coverageStatus: "missing", sampleSize: 0, layers: emptyLayers)
         }
 
-        let findings = hasFindings ? queryFallbackRetroFindings(db: db) : ([:], 0, [])
-        let horizon = hasHorizon ? queryFallbackHorizonWaste(db: db) : ([], nil)
+        let findings: ([String: FallbackLayerStats], Int, [AgentRetroSkillWatermark])
+        if hasFindings {
+            guard let queried = queryFallbackRetroFindings(db: db) else {
+                return AgentRetroWorkbenchSummary(coverageStatus: "error", sampleSize: 0, layers: emptyLayers)
+            }
+            findings = queried
+        } else {
+            findings = ([:], 0, [])
+        }
+
+        let horizon: ([AgentHorizonWasteItem], Int, String?)
+        if hasHorizon {
+            guard let queried = queryFallbackHorizonWaste(db: db) else {
+                return AgentRetroWorkbenchSummary(coverageStatus: "error", sampleSize: 0, layers: emptyLayers)
+            }
+            horizon = queried
+        } else {
+            horizon = ([], 0, nil)
+        }
+
         return assembleFallbackAgentRetro(
             byLayer: findings.0,
-            distinctSessionSample: findings.1,
+            distinctSessionSample: max(findings.1, horizon.1),
             watermarks: findings.2,
             horizonItems: horizon.0,
-            horizonAsOf: horizon.1
+            horizonAsOf: horizon.2
         )
     }
 
     private static func queryFallbackRetroFindings(
         db: OpaquePointer
-    ) -> ([String: FallbackLayerStats], Int, [AgentRetroSkillWatermark]) {
+    ) -> ([String: FallbackLayerStats], Int, [AgentRetroSkillWatermark])? {
         var byLayer: [String: FallbackLayerStats] = [:]
         var distinctSessionSample = 0
+        let popSQL = """
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_retro_finding WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT COUNT(DISTINCT f.session_id)
+        FROM fact_agent_retro_finding AS f
+        CROSS JOIN anchor AS a
+        WHERE f.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day;
+        """
         var popStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT COUNT(DISTINCT session_id) FROM fact_agent_retro_finding;", -1, &popStmt, nil) == SQLITE_OK, let popStmt {
-            defer { sqlite3_finalize(popStmt) }
-            if sqlite3_step(popStmt) == SQLITE_ROW {
-                distinctSessionSample = max(0, Int(sqlite3_column_int64(popStmt, 0)))
-            }
+        guard sqlite3_prepare_v2(db, popSQL, -1, &popStmt, nil) == SQLITE_OK, let popStmt else { return nil }
+        defer { sqlite3_finalize(popStmt) }
+        let popRC = sqlite3_step(popStmt)
+        if popRC == SQLITE_ROW {
+            distinctSessionSample = max(0, Int(sqlite3_column_int64(popStmt, 0)))
+        } else if popRC != SQLITE_DONE {
+            return nil
         }
+
         let layerSQL = """
-        SELECT layer_key,
-               SUM(CASE WHEN is_post_fix = 0 THEN occurrence_count ELSE 0 END),
-               SUM(CASE WHEN is_post_fix = 1 THEN occurrence_count ELSE 0 END),
-               COUNT(DISTINCT session_id),
-               MAX(role_key), MAX(skill), MAX(skill_version), MAX(cst_day)
-        FROM fact_agent_retro_finding GROUP BY layer_key;
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_retro_finding WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT f.layer_key,
+               SUM(CASE WHEN f.is_post_fix = 0 THEN f.occurrence_count ELSE 0 END),
+               SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END),
+               COUNT(DISTINCT f.session_id),
+               MAX(f.role_key), MAX(f.skill), MAX(f.skill_version), MAX(f.cst_day)
+        FROM fact_agent_retro_finding AS f
+        CROSS JOIN anchor AS a
+        WHERE f.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day
+        GROUP BY f.layer_key;
         """
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, layerSQL, -1, &stmt, nil) == SQLITE_OK, let stmt {
-            defer { sqlite3_finalize(stmt) }
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                guard let kPtr = sqlite3_column_text(stmt, 0) else { continue }
-                let key = String(cString: kPtr)
-                byLayer[key] = FallbackLayerStats(
-                    pre: max(0, Int(sqlite3_column_int64(stmt, 1))),
-                    post: max(0, Int(sqlite3_column_int64(stmt, 2))),
-                    sessions: max(0, Int(sqlite3_column_int64(stmt, 3))),
-                    role: sqlite3_column_text(stmt, 4).map { String(cString: $0) },
-                    skill: sqlite3_column_text(stmt, 5).map { String(cString: $0) },
-                    ver: sqlite3_column_text(stmt, 6).map { String(cString: $0) },
-                    asOf: sqlite3_column_text(stmt, 7).map { String(cString: $0) }
-                )
-            }
+        guard sqlite3_prepare_v2(db, layerSQL, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        while true {
+            let stepRC = sqlite3_step(stmt)
+            if stepRC == SQLITE_DONE { break }
+            guard stepRC == SQLITE_ROW else { return nil }
+            guard let kPtr = sqlite3_column_text(stmt, 0) else { continue }
+            let key = String(cString: kPtr)
+            byLayer[key] = FallbackLayerStats(
+                pre: max(0, Int(sqlite3_column_int64(stmt, 1))),
+                post: max(0, Int(sqlite3_column_int64(stmt, 2))),
+                sessions: max(0, Int(sqlite3_column_int64(stmt, 3))),
+                role: sqlite3_column_text(stmt, 4).map { String(cString: $0) },
+                skill: sqlite3_column_text(stmt, 5).map { String(cString: $0) },
+                ver: sqlite3_column_text(stmt, 6).map { String(cString: $0) },
+                asOf: sqlite3_column_text(stmt, 7).map { String(cString: $0) }
+            )
         }
-        let watermarks = queryFallbackRetroWatermarks(db: db)
+        guard let watermarks = queryFallbackRetroWatermarks(db: db) else { return nil }
         return (byLayer, distinctSessionSample, watermarks)
     }
 
-    private static func queryFallbackRetroWatermarks(db: OpaquePointer) -> [AgentRetroSkillWatermark] {
+    private static func queryFallbackRetroWatermarks(db: OpaquePointer) -> [AgentRetroSkillWatermark]? {
         let wmSQL = """
-        SELECT skill, MAX(skill_version),
-               SUM(CASE WHEN is_post_fix = 0 THEN occurrence_count ELSE 0 END),
-               SUM(CASE WHEN is_post_fix = 1 THEN occurrence_count ELSE 0 END),
-               MAX(cst_day)
-        FROM fact_agent_retro_finding GROUP BY skill
-        ORDER BY SUM(CASE WHEN is_post_fix = 1 THEN occurrence_count ELSE 0 END) DESC,
-                 SUM(occurrence_count) DESC, skill ASC;
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_retro_finding WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT f.skill, MAX(f.skill_version),
+               SUM(CASE WHEN f.is_post_fix = 0 THEN f.occurrence_count ELSE 0 END),
+               SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END),
+               MAX(f.cst_day)
+        FROM fact_agent_retro_finding AS f
+        CROSS JOIN anchor AS a
+        WHERE f.cst_day BETWEEN date(a.end_day, '-29 days') AND a.end_day
+        GROUP BY f.skill
+        ORDER BY SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END) DESC,
+                 SUM(f.occurrence_count) DESC, f.skill ASC;
         """
         var watermarks: [AgentRetroSkillWatermark] = []
         var wmStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, wmSQL, -1, &wmStmt, nil) == SQLITE_OK, let wmStmt else { return watermarks }
+        guard sqlite3_prepare_v2(db, wmSQL, -1, &wmStmt, nil) == SQLITE_OK, let wmStmt else { return nil }
         defer { sqlite3_finalize(wmStmt) }
-        while sqlite3_step(wmStmt) == SQLITE_ROW {
+        while true {
+            let stepRC = sqlite3_step(wmStmt)
+            if stepRC == SQLITE_DONE { break }
+            guard stepRC == SQLITE_ROW else { return nil }
             guard let skPtr = sqlite3_column_text(wmStmt, 0) else { continue }
             let sk = String(cString: skPtr)
             let ver = sqlite3_column_text(wmStmt, 1).map { String(cString: $0) }
@@ -3127,19 +3188,54 @@ extension LiveDashboardTelemetryReader {
         return version != nil ? "baseline" : "observing"
     }
 
-    private static func queryFallbackHorizonWaste(db: OpaquePointer) -> ([AgentHorizonWasteItem], String?) {
+    private static func queryFallbackHorizonWaste(db: OpaquePointer) -> ([AgentHorizonWasteItem], Int, String?)? {
+        var popSessions = 0
+        let popSQL = """
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_horizon_waste WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT COUNT(DISTINCT w.session_id)
+        FROM fact_agent_horizon_waste AS w
+        CROSS JOIN anchor AS a
+        WHERE w.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day;
+        """
+        var popStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, popSQL, -1, &popStmt, nil) == SQLITE_OK, let popStmt else { return nil }
+        defer { sqlite3_finalize(popStmt) }
+        let popRC = sqlite3_step(popStmt)
+        if popRC == SQLITE_ROW {
+            popSessions = max(0, Int(sqlite3_column_int64(popStmt, 0)))
+        } else if popRC != SQLITE_DONE {
+            return nil
+        }
+
         let hzSQL = """
-        SELECT category_key, role_key, skill, SUM(wasted_turns), SUM(wasted_tokens), ROUND(SUM(duration_sec), 1), MAX(cst_day)
-        FROM fact_agent_horizon_waste GROUP BY category_key, role_key, skill
-        ORDER BY SUM(wasted_tokens) DESC, SUM(wasted_turns) DESC;
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_horizon_waste WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT w.category_key, w.role_key, w.skill, SUM(w.wasted_turns), SUM(w.wasted_tokens), ROUND(SUM(w.duration_sec), 1), MAX(w.cst_day)
+        FROM fact_agent_horizon_waste AS w
+        CROSS JOIN anchor AS a
+        WHERE w.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day
+        GROUP BY w.category_key, w.role_key, w.skill
+        ORDER BY SUM(w.wasted_tokens) DESC, SUM(w.wasted_turns) DESC;
         """
         var hzStmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, hzSQL, -1, &hzStmt, nil) == SQLITE_OK, let hzStmt else { return ([], nil) }
+        guard sqlite3_prepare_v2(db, hzSQL, -1, &hzStmt, nil) == SQLITE_OK, let hzStmt else { return nil }
         defer { sqlite3_finalize(hzStmt) }
         var rawRows: [FallbackHorizonRawRow] = []
         var grandTokens: UInt64 = 0
         var horizonAsOf: String?
-        while sqlite3_step(hzStmt) == SQLITE_ROW {
+        while true {
+            let stepRC = sqlite3_step(hzStmt)
+            if stepRC == SQLITE_DONE { break }
+            guard stepRC == SQLITE_ROW else { return nil }
             let row = FallbackHorizonRawRow(
                 cat: sqlite3_column_text(hzStmt, 0).map { String(cString: $0) } ?? "context_carry",
                 rkey: sqlite3_column_text(hzStmt, 1).map { String(cString: $0) } ?? "writer",
@@ -3164,7 +3260,7 @@ extension LiveDashboardTelemetryReader {
                 skill: row.skill, wastedTurns: row.turns, wastedTokens: row.toks, durationSec: row.dur, tokenSharePct: pct
             )
         }
-        return (items, horizonAsOf)
+        return (items, popSessions, horizonAsOf)
     }
 
     private static func assembleFallbackAgentRetro(
