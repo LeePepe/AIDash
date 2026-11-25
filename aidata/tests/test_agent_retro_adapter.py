@@ -20,7 +20,7 @@ def test_normalize_records_persists_privacy_safe_6_layers_watermarks_and_horizon
         {
             "kind": "retro_finding",
             "source": "copilot_cli",
-            "session_id": "/Users/secretuser/private/session-001",
+            "session_id": "/private/tmp/fixture-owner/session-001",
             "goal_id": "aidata-agent-retro-v2",
             "role": "m1_steering",
             "skill": "goal-target-task",
@@ -30,9 +30,9 @@ def test_normalize_records_persists_privacy_safe_6_layers_watermarks_and_horizon
             "skill_version": "2.1.0+v14@9abc123",
             "pre_fix_count": 2,
             "post_fix_count": 1,
-            "prompt": "Bearer ghp_secretTokenShouldNeverPersist1234567890",
+            "prompt": "raw prompt text fixture-credential-marker",
             "transcript": "raw user transcript that must never land in sqlite",
-            "file_path": "/Users/secretuser/secret-key.pem",
+            "file_path": "/private/tmp/fixture-owner/secret-key.pem",
             "ts": "2026-11-24T18:30:00Z",
         },
         {
@@ -49,7 +49,7 @@ def test_normalize_records_persists_privacy_safe_6_layers_watermarks_and_horizon
         {
             "kind": "horizon_waste",
             "source": "copilot_cli",
-            "session_id": "/Users/secretuser/private/session-001",
+            "session_id": "/private/tmp/fixture-owner/session-001",
             "role_key": "m1",
             "skill": "agent-retro",
             "horizon_code": "HZN1_context_carry_tax",
@@ -80,8 +80,8 @@ def test_normalize_records_persists_privacy_safe_6_layers_watermarks_and_horizon
     assert f_rows[0]["layer_key"] == "invoke"
     assert f_rows[0]["skill_version"] == "v14@9abc123"
     assert f_rows[0]["session_id"].startswith("sess:")
-    assert "secretuser" not in json.dumps(f_rows)
-    assert "ghp_" not in json.dumps(f_rows)
+    assert "fixture-owner" not in json.dumps(f_rows)
+    assert "fixture-credential-marker" not in json.dumps(f_rows)
     assert "transcript" not in json.dumps(f_rows)
 
     assert len(w_rows) == 1
@@ -91,7 +91,7 @@ def test_normalize_records_persists_privacy_safe_6_layers_watermarks_and_horizon
     assert w_rows[0]["wasted_tokens"] == 18400
     assert w_rows[0]["duration_sec"] == 42.5
     assert w_rows[0]["session_id"] == f_rows[0]["session_id"]
-    assert "secretuser" not in json.dumps(w_rows)
+    assert "fixture-owner" not in json.dumps(w_rows)
 
 
 def test_collect_is_deduplicated_and_degrades_to_zero_when_absent(tmp_path, monkeypatch):
