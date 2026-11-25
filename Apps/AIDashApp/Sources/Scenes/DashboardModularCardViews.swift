@@ -730,6 +730,9 @@ public struct AgentEfficiencyChartsCardView: View {
                             dailyThroughputPanel(snapshot)
                         }
                     }
+                    if let retro = snapshot.agentRetro {
+                        AgentRetroTrajectoryPanelsView(retro: retro)
+                    }
                 }
             } else {
                 emptyStatePanel

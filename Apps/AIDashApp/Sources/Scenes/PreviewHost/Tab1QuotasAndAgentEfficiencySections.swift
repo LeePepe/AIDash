@@ -364,7 +364,43 @@ private struct PreviewAgentOverviewSection: View {
                 PreviewPill("\(activeRole.durationDeltaText) 提速", tint: .green)
             }
             PreviewSparkline(values: activeRole.durationTrend, tint: .blue, height: 24)
+            AgentRetroTrajectoryPanelsView(retro: Self.sampleAgentRetro)
         }
+    }
+
+    private static var sampleAgentRetro: AgentRetroWorkbenchSummary {
+        AgentRetroWorkbenchSummary(
+            coverageStatus: "healthy",
+            sampleSize: 42,
+            sourceAsOf: "2026-11-24",
+            windowCST: "14d",
+            preFixTotal: 11,
+            postFixTotal: 1,
+            layers: [
+                AgentRetroLayerRow(layerKey: "role", labelZh: "角色边界", labelEn: "Role Boundaries", preFixCount: 3, postFixCount: 0, affectedSessions: 2, topRoleKey: "m2", topSkill: "m2-dispatcher", topSkillVersion: "v5@abc1234"),
+                AgentRetroLayerRow(layerKey: "handoff", labelZh: "交接完整度", labelEn: "Handoff Completeness", preFixCount: 2, postFixCount: 0, affectedSessions: 2, topRoleKey: "m1", topSkill: "team-lead", topSkillVersion: "v22@1234abc"),
+                AgentRetroLayerRow(layerKey: "invoke", labelZh: "工具与参考调用", labelEn: "Tool & Reference Invocation", preFixCount: 3, postFixCount: 1, affectedSessions: 3, topRoleKey: "explorer", topSkill: "agent-retro", topSkillVersion: "v9@def5678"),
+                AgentRetroLayerRow(layerKey: "exec", labelZh: "执行与返工收敛", labelEn: "Execution & Rework Convergence", preFixCount: 2, postFixCount: 0, affectedSessions: 1, topRoleKey: "writer", topSkill: "xcode-cli", topSkillVersion: "v7@7890fed"),
+                AgentRetroLayerRow(layerKey: "friction", labelZh: "人机协作摩擦", labelEn: "Human-Agent Collaboration Friction", preFixCount: 1, postFixCount: 0, affectedSessions: 1, topRoleKey: "m1", topSkill: "my-designer", topSkillVersion: "v14@4567cba"),
+                AgentRetroLayerRow(layerKey: "horizon", labelZh: "长程上下文损耗", labelEn: "Long-Horizon Context Waste", preFixCount: 0, postFixCount: 0, affectedSessions: 0),
+            ],
+            horizonWaste: AgentHorizonWasteSummary(
+                wastedTurnsTotal: 14,
+                wastedTokensTotal: 32_000,
+                items: [
+                    AgentHorizonWasteItem(categoryKey: "context_carry", labelZh: "只读状态轮询可收编脚本", labelEn: "Read-Only Status Polling Scriptable", roleKey: "m1", skill: "agent-retro", wastedTurns: 6, wastedTokens: 16_000, durationSec: 42, tokenSharePct: 50.0),
+                    AgentHorizonWasteItem(categoryKey: "fatigue_inflection", labelZh: "重复全量重读可改增量", labelEn: "Repeated Full Re-Reads Replaceable by Delta", roleKey: "writer", skill: "my-designer", wastedTurns: 4, wastedTokens: 9_600, durationSec: 28, tokenSharePct: 30.0),
+                    AgentHorizonWasteItem(categoryKey: "steering_overkill", labelZh: "高阶模型做机械活可降档", labelEn: "High-Tier Model Mechanical Work Downgradable", roleKey: "m1", skill: "team-lead", wastedTurns: 2, wastedTokens: 3_800, durationSec: 15, tokenSharePct: 11.9),
+                    AgentHorizonWasteItem(categoryKey: "rework_verify", labelZh: "缺内环快测致外环返工", labelEn: "Outer-Loop Rework Missing Fast Check", roleKey: "writer", skill: "xcode-cli", wastedTurns: 2, wastedTokens: 2_600, durationSec: 19, tokenSharePct: 8.1),
+                ]
+            ),
+            skillWatermarks: [
+                AgentRetroSkillWatermark(skill: "m2-dispatcher", skillVersion: "v5@abc1234", preFixCount: 3, postFixCount: 0, status: "improved"),
+                AgentRetroSkillWatermark(skill: "team-lead", skillVersion: "v22@1234abc", preFixCount: 2, postFixCount: 0, status: "improved"),
+                AgentRetroSkillWatermark(skill: "agent-retro", skillVersion: "v9@def5678", preFixCount: 3, postFixCount: 1, status: "observing"),
+                AgentRetroSkillWatermark(skill: "xcode-cli", skillVersion: "v7@7890fed", preFixCount: 2, postFixCount: 0, status: "improved"),
+            ]
+        )
     }
 
     private var autoInspectionsInstrument: some View {

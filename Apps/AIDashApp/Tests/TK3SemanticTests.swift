@@ -1466,5 +1466,78 @@ struct TK3SnapshotRenderTests {
         }
         #expect(recorder.samples.contains { $0.id == "skills-row-team-lead" })
     }
+
+    @Test("AgentRetroTrajectoryPanelsView keeps accessibility tree plain-language across populated, partial, empty, and degraded states")
+    func agentRetroPanelsAccessibilityPlainLanguageContract() throws {
+        let layers = [
+            AgentRetroLayerRow(layerKey: "role", labelZh: "角色边界", labelEn: "Role Boundaries", preFixCount: 3, postFixCount: 0, affectedSessions: 2, topRoleKey: "m2", topSkill: "m2-dispatcher", topSkillVersion: "v5@abc1234"),
+            AgentRetroLayerRow(layerKey: "handoff", labelZh: "交接完整度", labelEn: "Handoff Completeness", preFixCount: 2, postFixCount: 0, affectedSessions: 1, topRoleKey: "m1", topSkill: "team-lead", topSkillVersion: "v22@1234abc"),
+            AgentRetroLayerRow(layerKey: "invoke", labelZh: "工具与参考调用", labelEn: "Tool & Reference Invocation", preFixCount: 1, postFixCount: 1, affectedSessions: 1, topRoleKey: "explorer", topSkill: "agent-retro", topSkillVersion: "v9@def5678"),
+            AgentRetroLayerRow(layerKey: "exec", labelZh: "执行与返工收敛", labelEn: "Execution & Rework Convergence", preFixCount: 1, postFixCount: 0, affectedSessions: 1),
+            AgentRetroLayerRow(layerKey: "friction", labelZh: "人机协作摩擦", labelEn: "Human-Agent Collaboration Friction", preFixCount: 0, postFixCount: 0, affectedSessions: 0),
+            AgentRetroLayerRow(layerKey: "horizon", labelZh: "长程上下文损耗", labelEn: "Long-Horizon Context Waste", preFixCount: 0, postFixCount: 0, affectedSessions: 0),
+        ]
+        let populated = AgentRetroWorkbenchSummary(
+            coverageStatus: "healthy",
+            sampleSize: 12,
+            sourceAsOf: "2026-11-24",
+            windowCST: "14d",
+            preFixTotal: 7,
+            postFixTotal: 1,
+            layers: layers,
+            horizonWaste: AgentHorizonWasteSummary(
+                wastedTurnsTotal: 8,
+                wastedTokensTotal: 19_200,
+                items: [
+                    AgentHorizonWasteItem(categoryKey: "context_carry", labelZh: "只读状态轮询可收编脚本", labelEn: "Read-Only Status Polling Scriptable", roleKey: "m1", skill: "agent-retro", wastedTurns: 5, wastedTokens: 12_000, durationSec: 30, tokenSharePct: 62.5),
+                    AgentHorizonWasteItem(categoryKey: "rework_verify", labelZh: "缺内环快测致外环返工", labelEn: "Outer-Loop Rework Missing Fast Check", roleKey: "writer", skill: "xcode-cli", wastedTurns: 3, wastedTokens: 7_200, durationSec: 18, tokenSharePct: 37.5),
+                ]
+            ),
+            skillWatermarks: [
+                AgentRetroSkillWatermark(skill: "m2-dispatcher", skillVersion: "v5@abc1234", preFixCount: 3, postFixCount: 0, status: "improved"),
+                AgentRetroSkillWatermark(skill: "agent-retro", skillVersion: "v9@def5678", preFixCount: 1, postFixCount: 1, status: "observing"),
+            ]
+        )
+        let partial = AgentRetroWorkbenchSummary(coverageStatus: "partial", sampleSize: 4, windowCST: "14d", preFixTotal: 3, postFixTotal: 0, layers: layers)
+        let empty = AgentRetroWorkbenchSummary(coverageStatus: "unknown", sampleSize: 0, layers: layers)
+        let degraded = AgentRetroWorkbenchSummary(coverageStatus: "missing", sampleSize: 0, layers: layers)
+
+        let forbiddenRegex = try NSRegularExpression(
+            pattern: #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?|python3|skill_contract\.py|skill_retro\.py|agent_retro\.py|session_id|SKILL\.md|inspector)\b"#,
+            options: [.caseInsensitive]
+        )
+        let outputDir = FileManager.default.temporaryDirectory.appendingPathComponent("tk3-agent-retro-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+
+        for (name, sample) in [("populated", populated), ("partial", partial), ("empty", empty), ("degraded", degraded)] {
+            for scheme in [ColorScheme.light, ColorScheme.dark] {
+                let root = AgentRetroTrajectoryPanelsView(retro: sample)
+                    .frame(width: 920, alignment: .topLeading)
+                    .padding(16)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.theme, Theme(isDark: scheme == .dark))
+                let renderer = ImageRenderer(content: root)
+                renderer.scale = 2
+                let image = try #require(renderer.nsImage)
+                let tiff = try #require(image.tiffRepresentation)
+                let rep = try #require(NSBitmapImageRep(data: tiff))
+                let png = try #require(rep.representation(using: .png, properties: [:]))
+                #expect(!png.isEmpty)
+                try png.write(to: outputDir.appendingPathComponent("panel-\(name)-\(scheme == .dark ? "dark" : "light").png"))
+
+                let hosting = NSHostingView(rootView: root)
+                hosting.frame = NSRect(x: 0, y: 0, width: 960, height: 600)
+                hosting.layoutSubtreeIfNeeded()
+                let axText = collectAccessibilityStrings(from: hosting).joined(separator: " ")
+                let matches = forbiddenRegex.matches(
+                    in: axText,
+                    range: NSRange(axText.startIndex..<axText.endIndex, in: axText)
+                )
+                #expect(matches.isEmpty, "Forbidden code leaked into AgentRetroTrajectoryPanelsView accessibility (\(name)): \(axText)")
+            }
+        }
+    }
 }
 #endif

@@ -874,6 +874,21 @@
                     )
                 )
             }
+            for wm in report.resolvedSkillRetro.agentRetroWatermarks where wm.preFixCount > 0 && wm.postFixCount == 0 && !seen.contains(wm.skill) {
+                seen.insert(wm.skill)
+                merged.append(
+                    SkillRetroRoadblockItem(
+                        skill: wm.skill,
+                        script: "",
+                        skillVersion: wm.skillVersion ?? "v1",
+                        calls: wm.preFixCount,
+                        totalExit2Count: wm.preFixCount,
+                        preFixCount: wm.preFixCount,
+                        postFixCount: wm.postFixCount,
+                        watermarkStatus: wm.status
+                    )
+                )
+            }
             return merged
         }
 
@@ -1799,6 +1814,13 @@
                                     .font(.caption)
                                     .foregroundStyle(theme.text(.body))
                             }
+                            if let watermark = report?.resolvedSkillRetro.agentRetroWatermarks.first(where: { $0.skill == detail.skill }) {
+                                let verTag = watermark.skillVersion ?? "v1"
+                                let wmLine = "\(skillsText("trajectory_watermark", "轨迹水位")) \(verTag) · \(skillsText("baseline_short", "修复前")) \(watermark.preFixCount) → \(skillsText("new_anomalies_short", "新异常")) \(watermark.postFixCount)"
+                                Text(wmLine)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(watermark.postFixCount == 0 ? theme.success : theme.warning)
+                            }
                         }
                         healthSection(skillsText("health_scripts", "名下脚本")) {
                             ForEach(detail.scripts) { script in
@@ -2286,11 +2308,14 @@
         }
 
         public static func scrubAcademicCodes(_ raw: String) -> String {
-            guard let regex = try? NSRegularExpression(pattern: #"\bS(?:1[0-2]|[1-9])\b"#) else { return raw }
+            let pattern = #"\b(?:S(?:1[0-2]|[1-9])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)\b"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return raw }
             let range = NSRange(raw.startIndex ..< raw.endIndex, in: raw)
-            return regex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
-                .replacingOccurrences(of: "  ", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            var cleaned = regex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
+            while cleaned.contains("  ") {
+                cleaned = cleaned.replacingOccurrences(of: "  ", with: " ")
+            }
+            return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 
@@ -2991,6 +3016,7 @@
         public let crossRepoGateHealth: SkillRetroCrossRepoGateSummary?
         public let wildPatterns: [SkillRetroWildPatternItem]
         public let proposals: [SkillRetroProposalItem]
+        public let agentRetroWatermarks: [AgentRetroSkillWatermark]
 
         private struct Layer0Section: Decodable {
             let triggerMisses: [SkillRetroTriggerMissItem]?
@@ -3097,7 +3123,8 @@
             latencySinks: [SkillRetroLatencySinkItem] = [],
             crossRepoGateHealth: SkillRetroCrossRepoGateSummary? = nil,
             wildPatterns: [SkillRetroWildPatternItem] = [],
-            proposals: [SkillRetroProposalItem] = []
+            proposals: [SkillRetroProposalItem] = [],
+            agentRetroWatermarks: [AgentRetroSkillWatermark] = []
         ) {
             self.sampleSize = sampleSize
             self.slowFlywheelReady = slowFlywheelReady
@@ -3126,6 +3153,7 @@
             self.crossRepoGateHealth = crossRepoGateHealth
             self.wildPatterns = wildPatterns
             self.proposals = proposals.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+            self.agentRetroWatermarks = agentRetroWatermarks.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
         }
 
         public init(from decoder: Decoder) throws {
@@ -3187,6 +3215,8 @@
             wildPatternsCount = (try? f.value("wild_patterns_count", as: Int.self)) ?? nested?.wildPatternsCount ?? decodedWildPatterns.count
             let decodedProposals = (try? f.value("proposals", as: [SkillRetroProposalItem].self)) ?? []
             proposals = decodedProposals.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+            let decodedAgentWatermarks = (try? f.value("agent_retro_watermarks", as: [AgentRetroSkillWatermark].self)) ?? []
+            agentRetroWatermarks = decodedAgentWatermarks.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
         }
     }
 

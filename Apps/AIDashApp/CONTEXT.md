@@ -52,3 +52,10 @@ announced, while all semantic colors come from the injected DesignKit theme.
 It never renders diagnostic workbenches, source previews, commands, session
 samples, or root-cause panels. Responsive geometry is proposal-driven and
 Decodable report models remain backward compatible with existing fixtures.
+
+Agent Efficiency (`AgentEfficiencyWorkbenchSnapshot` + `AgentRetroTrajectoryPanelsView`)
+decodes optional `agent_retro` 6-layer trajectory health, long-horizon waste,
+and `vN@sha` post-fix watermarks (plus `agent_retro_watermarks` in `skill_retro`)
+using plain-language labels and honest degraded/empty states without bare
+internal codes.
+
