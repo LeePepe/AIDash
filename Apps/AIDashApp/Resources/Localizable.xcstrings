@@ -13726,6 +13726,279 @@
           "en": {"stringUnit": {"state": "translated", "value": "raw edit churn"}},
           "zh-Hans": {"stringUnit": {"state": "translated", "value": "原始擦写"}}
         }
+      },
+      "dashboard.skills_roi.trajectory_watermark": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Trajectory watermark"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "轨迹水位"}}
+        }
+      },
+      "dashboard.skills_roi.baseline_short": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "pre-fix"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "修复前"}}
+        }
+      },
+      "dashboard.skills_roi.new_anomalies_short": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "new anomalies"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "新异常"}}
+        }
+      },
+      "dashboard.agent_retro.filter_all": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "All Layers"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "全部层"}}
+        }
+      },
+      "dashboard.agent_retro.filter_unconverged": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Unconverged Only"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "仅看未收敛"}}
+        }
+      },
+      "dashboard.agent_retro.filter_picker": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Layer Filter"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "分层筛选"}}
+        }
+      },
+      "dashboard.agent_retro.coverage_partial": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Partial Sample Coverage"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "部分样本覆盖"}}
+        }
+      },
+      "dashboard.agent_retro.partial_detail_format": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Observed %lld sessions in %@ window"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "已覆盖 %lld 个会话样本 · 窗口 %@"}}
+        }
+      },
+      "dashboard.agent_retro.empty_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No Trajectory Diagnostic Samples Yet"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "暂无轨迹诊断样本"}}
+        }
+      },
+      "dashboard.agent_retro.empty_desc": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Trajectory health and long-horizon waste panels appear once session diagnostics are collected."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "采集真实多角色协作轨迹后将自动展示六层健康度与长程上下文损耗。"}}
+        }
+      },
+      "dashboard.agent_retro.status_degraded": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Diagnostics Degraded"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "诊断状态降级"}}
+        }
+      },
+      "dashboard.agent_retro.status_missing": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Trajectory Source Uncollected"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "轨迹数据源未采集"}}
+        }
+      },
+      "dashboard.agent_retro.degraded_error_desc": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Trajectory diagnostic query encountered a read error; zero values are withheld to preserve metric honesty."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "轨迹诊断读取异常，暂不展示伪造零值以保持指标真实性。"}}
+        }
+      },
+      "dashboard.agent_retro.degraded_missing_desc": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Trajectory diagnostic warehouse table is not yet initialized; zero values are withheld."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "轨迹诊断数仓表尚未初始化，暂不展示伪造零值。"}}
+        }
+      },
+      "dashboard.agent_retro.six_layer_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "6-Layer Trajectory Health & Watermarks"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "六层轨迹健康度与版本水位"}}
+        }
+      },
+      "dashboard.agent_retro.six_layer_subtitle_format": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Pre-fix baseline %lld vs current-version new anomalies %lld"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "修复前基线 %lld 项 vs 当前版本新异常 %lld 项"}}
+        }
+      },
+      "dashboard.agent_retro.all_converged_note": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "All 6 trajectory layers have zero new anomalies in the current version."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "全部六层在当前版本新异常均已清零收敛。"}}
+        }
+      },
+      "dashboard.agent_retro.pre_fix_badge_format": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Pre-fix %lld"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "修复前基线 %lld"}}
+        }
+      },
+      "dashboard.agent_retro.post_fix_badge_format": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "New %lld"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "当前版本新异常 %lld"}}
+        }
+      },
+      "dashboard.agent_retro.sessions_count_format": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "%lld sessions"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "涉及 %lld 个会话"}}
+        }
+      },
+      "dashboard.agent_retro.watermarks_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Skill Post-Fix Watermarks"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "核心版本水位标签"}}
+        }
+      },
+      "dashboard.agent_retro.watermark_chip_stat_format": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "%@ · New %lld"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "%@ · 新异常 %lld"}}
+        }
+      },
+      "dashboard.agent_retro.layer.role": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Role Boundaries"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "角色边界"}}
+        }
+      },
+      "dashboard.agent_retro.layer.handoff": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Handoff Completeness"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "交接完整度"}}
+        }
+      },
+      "dashboard.agent_retro.layer.invoke": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Tool & Reference Invocation"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "工具与参考调用"}}
+        }
+      },
+      "dashboard.agent_retro.layer.exec": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Execution & Rework Convergence"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "执行与返工收敛"}}
+        }
+      },
+      "dashboard.agent_retro.layer.friction": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Human-Agent Collaboration Friction"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "人机协作摩擦"}}
+        }
+      },
+      "dashboard.agent_retro.layer.horizon": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Long-Horizon Context Waste"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "长程上下文损耗"}}
+        }
+      },
+      "dashboard.agent_retro.horizon_title": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Long-Horizon Waste & Optimization"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "长程上下文损耗与优化空间"}}
+        }
+      },
+      "dashboard.agent_retro.horizon_subtitle": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Avoidable turns and context tokens across extended execution chains"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "长链路执行中可节省的冗余轮次与上下文消耗分布"}}
+        }
+      },
+      "dashboard.agent_retro.savable_turns": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Savable Turns"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "可省轮次"}}
+        }
+      },
+      "dashboard.agent_retro.savable_tokens": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Savable Context Spend"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "可省上下文消耗"}}
+        }
+      },
+      "dashboard.agent_retro.horizon_empty": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "No significant long-horizon context waste observed in current window."}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "当前时间窗内未观测到显著的长程上下文损耗。"}}
+        }
+      },
+      "dashboard.agent_retro.waste_row_stat_format": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "%lld turns · %@"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "%lld 轮 · %@"}}
+        }
+      },
+      "dashboard.agent_retro.waste.context_carry": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Read-Only Status Polling Scriptable"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "只读状态轮询可收编脚本"}}
+        }
+      },
+      "dashboard.agent_retro.waste.fatigue_inflection": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Repeated Full Re-Reads Replaceable by Delta"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "重复全量重读可改增量"}}
+        }
+      },
+      "dashboard.agent_retro.waste.steering_overkill": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "High-Tier Model Mechanical Work Downgradable"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "高阶模型做机械活可降档"}}
+        }
+      },
+      "dashboard.agent_retro.waste.rework_verify": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Outer-Loop Rework Missing Fast Check"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "缺内环快测致外环返工"}}
+        }
+      },
+      "dashboard.agent_retro.waste.wakeup_parallelism": {
+        "extractionState": "manual",
+        "localizations": {
+          "en": {"stringUnit": {"state": "translated", "value": "Wakeup Lag & Serial Queueing"}},
+          "zh-Hans": {"stringUnit": {"state": "translated", "value": "唤醒延迟与串行排队"}}
+        }
       }
   },
   "version": "1.0"

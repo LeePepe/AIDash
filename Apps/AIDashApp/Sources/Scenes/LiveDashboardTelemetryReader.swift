@@ -229,6 +229,326 @@ public struct AgentRoundDistributionSummary: Codable, Sendable, Equatable {
     }
 }
 
+private func saturatingAddInt(_ lhs: Int, _ rhs: Int) -> Int {
+    let a = max(0, lhs)
+    let b = max(0, rhs)
+    let (sum, overflow) = a.addingReportingOverflow(b)
+    return overflow ? Int.max : sum
+}
+
+private func saturatingAddUInt64(_ lhs: UInt64, _ rhs: UInt64) -> UInt64 {
+    let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+    return overflow ? UInt64.max : sum
+}
+
+public struct AgentRetroLayerRow: Codable, Sendable, Equatable, Identifiable {
+    public let layerKey: String
+    public let labelZh: String
+    public let labelEn: String
+    public let preFixCount: Int
+    public let postFixCount: Int
+    public let totalCount: Int
+    public let affectedSessions: Int
+    public let topRoleKey: String?
+    public let topRoleLabelZh: String?
+    public let topRoleLabelEn: String?
+    public let topSkill: String?
+    public let topSkillVersion: String?
+
+    public var id: String { layerKey }
+
+    enum CodingKeys: String, CodingKey {
+        case layerKey = "layer_key"
+        case labelZh = "label_zh"
+        case labelEn = "label_en"
+        case preFixCount = "pre_fix_count"
+        case postFixCount = "post_fix_count"
+        case totalCount = "total_count"
+        case affectedSessions = "affected_sessions"
+        case topRoleKey = "top_role_key"
+        case topRoleLabelZh = "top_role_label_zh"
+        case topRoleLabelEn = "top_role_label_en"
+        case topSkill = "top_skill"
+        case topSkillVersion = "top_skill_version"
+    }
+
+    public init(
+        layerKey: String,
+        labelZh: String,
+        labelEn: String,
+        preFixCount: Int = 0,
+        postFixCount: Int = 0,
+        totalCount: Int? = nil,
+        affectedSessions: Int = 0,
+        topRoleKey: String? = nil,
+        topRoleLabelZh: String? = nil,
+        topRoleLabelEn: String? = nil,
+        topSkill: String? = nil,
+        topSkillVersion: String? = nil
+    ) {
+        self.layerKey = layerKey
+        self.labelZh = labelZh
+        self.labelEn = labelEn
+        let safePre = max(0, preFixCount)
+        let safePost = max(0, postFixCount)
+        self.preFixCount = safePre
+        self.postFixCount = safePost
+        self.totalCount = max(saturatingAddInt(safePre, safePost), max(0, totalCount ?? 0))
+        self.affectedSessions = max(0, affectedSessions)
+        self.topRoleKey = topRoleKey
+        self.topRoleLabelZh = topRoleLabelZh
+        self.topRoleLabelEn = topRoleLabelEn
+        self.topSkill = topSkill
+        self.topSkillVersion = topSkillVersion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let key = (try? container.decode(String.self, forKey: .layerKey)) ?? "role"
+        let pre = max(0, (try? container.decode(Int.self, forKey: .preFixCount)) ?? 0)
+        let post = max(0, (try? container.decode(Int.self, forKey: .postFixCount)) ?? 0)
+        let total = max(saturatingAddInt(pre, post), max(0, (try? container.decode(Int.self, forKey: .totalCount)) ?? 0))
+        self.layerKey = key
+        self.labelZh = (try? container.decode(String.self, forKey: .labelZh)) ?? key
+        self.labelEn = (try? container.decode(String.self, forKey: .labelEn)) ?? key
+        self.preFixCount = pre
+        self.postFixCount = post
+        self.totalCount = total
+        self.affectedSessions = max(0, (try? container.decode(Int.self, forKey: .affectedSessions)) ?? 0)
+        self.topRoleKey = try? container.decodeIfPresent(String.self, forKey: .topRoleKey)
+        self.topRoleLabelZh = try? container.decodeIfPresent(String.self, forKey: .topRoleLabelZh)
+        self.topRoleLabelEn = try? container.decodeIfPresent(String.self, forKey: .topRoleLabelEn)
+        self.topSkill = try? container.decodeIfPresent(String.self, forKey: .topSkill)
+        self.topSkillVersion = try? container.decodeIfPresent(String.self, forKey: .topSkillVersion)
+    }
+}
+
+public struct AgentHorizonWasteItem: Codable, Sendable, Equatable, Identifiable {
+    public let categoryKey: String
+    public let labelZh: String
+    public let labelEn: String
+    public let roleKey: String
+    public let roleLabelZh: String
+    public let roleLabelEn: String
+    public let skill: String
+    public let wastedTurns: Int
+    public let wastedTokens: UInt64
+    public let durationSec: Double
+    public let tokenSharePct: Double
+
+    public var id: String { "\(categoryKey):\(roleKey):\(skill)" }
+
+    enum CodingKeys: String, CodingKey {
+        case categoryKey = "category_key"
+        case labelZh = "label_zh"
+        case labelEn = "label_en"
+        case roleKey = "role_key"
+        case roleLabelZh = "role_label_zh"
+        case roleLabelEn = "role_label_en"
+        case skill
+        case wastedTurns = "wasted_turns"
+        case wastedTokens = "wasted_tokens"
+        case durationSec = "duration_sec"
+        case tokenSharePct = "token_share_pct"
+    }
+
+    public init(
+        categoryKey: String,
+        labelZh: String,
+        labelEn: String,
+        roleKey: String = "writer",
+        roleLabelZh: String = "",
+        roleLabelEn: String = "",
+        skill: String = "unmeasured",
+        wastedTurns: Int = 0,
+        wastedTokens: UInt64 = 0,
+        durationSec: Double = 0,
+        tokenSharePct: Double = 0
+    ) {
+        self.categoryKey = categoryKey
+        self.labelZh = labelZh
+        self.labelEn = labelEn
+        self.roleKey = roleKey
+        self.roleLabelZh = roleLabelZh
+        self.roleLabelEn = roleLabelEn
+        self.skill = skill
+        self.wastedTurns = max(0, wastedTurns)
+        self.wastedTokens = wastedTokens
+        self.durationSec = max(0, durationSec)
+        self.tokenSharePct = max(0, tokenSharePct)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let catKey = (try? container.decode(String.self, forKey: .categoryKey)) ?? "context_carry"
+        let rKey = (try? container.decode(String.self, forKey: .roleKey)) ?? "writer"
+        self.categoryKey = catKey
+        self.labelZh = (try? container.decode(String.self, forKey: .labelZh)) ?? catKey
+        self.labelEn = (try? container.decode(String.self, forKey: .labelEn)) ?? catKey
+        self.roleKey = rKey
+        self.roleLabelZh = (try? container.decode(String.self, forKey: .roleLabelZh)) ?? rKey
+        self.roleLabelEn = (try? container.decode(String.self, forKey: .roleLabelEn)) ?? rKey
+        self.skill = (try? container.decode(String.self, forKey: .skill)) ?? "unmeasured"
+        self.wastedTurns = max(0, (try? container.decode(Int.self, forKey: .wastedTurns)) ?? 0)
+        self.wastedTokens = (try? container.decode(UInt64.self, forKey: .wastedTokens)) ?? 0
+        self.durationSec = max(0, (try? container.decode(Double.self, forKey: .durationSec)) ?? 0)
+        self.tokenSharePct = max(0, (try? container.decode(Double.self, forKey: .tokenSharePct)) ?? 0)
+    }
+}
+
+public struct AgentHorizonWasteSummary: Codable, Sendable, Equatable {
+    public let wastedTurnsTotal: Int
+    public let wastedTokensTotal: UInt64
+    public let items: [AgentHorizonWasteItem]
+
+    enum CodingKeys: String, CodingKey {
+        case wastedTurnsTotal = "wasted_turns_total"
+        case wastedTokensTotal = "wasted_tokens_total"
+        case items
+    }
+
+    public init(
+        wastedTurnsTotal: Int = 0,
+        wastedTokensTotal: UInt64 = 0,
+        items: [AgentHorizonWasteItem] = []
+    ) {
+        self.wastedTurnsTotal = max(0, wastedTurnsTotal)
+        self.wastedTokensTotal = wastedTokensTotal
+        self.items = items
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedItems = (try? container.decode([AgentHorizonWasteItem].self, forKey: .items)) ?? []
+        self.items = decodedItems
+        self.wastedTurnsTotal = max(
+            0,
+            (try? container.decode(Int.self, forKey: .wastedTurnsTotal))
+                ?? decodedItems.reduce(0) { saturatingAddInt($0, $1.wastedTurns) }
+        )
+        self.wastedTokensTotal = (try? container.decode(UInt64.self, forKey: .wastedTokensTotal))
+            ?? decodedItems.reduce(UInt64(0)) { saturatingAddUInt64($0, $1.wastedTokens) }
+    }
+}
+
+public struct AgentRetroSkillWatermark: Codable, Sendable, Equatable, Identifiable {
+    public let skill: String
+    public let skillVersion: String?
+    public let preFixCount: Int
+    public let postFixCount: Int
+    public let status: String
+    public let sourceAsOf: String?
+
+    public var id: String { skill }
+
+    enum CodingKeys: String, CodingKey {
+        case skill
+        case skillVersion = "skill_version"
+        case preFixCount = "pre_fix_count"
+        case postFixCount = "post_fix_count"
+        case status
+        case sourceAsOf = "source_as_of"
+    }
+
+    public init(
+        skill: String,
+        skillVersion: String? = nil,
+        preFixCount: Int = 0,
+        postFixCount: Int = 0,
+        status: String = "observing",
+        sourceAsOf: String? = nil
+    ) {
+        self.skill = skill
+        self.skillVersion = skillVersion
+        self.preFixCount = max(0, preFixCount)
+        self.postFixCount = max(0, postFixCount)
+        self.status = status
+        self.sourceAsOf = sourceAsOf
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.skill = (try? container.decode(String.self, forKey: .skill)) ?? ""
+        self.skillVersion = try? container.decodeIfPresent(String.self, forKey: .skillVersion)
+        self.preFixCount = max(0, (try? container.decode(Int.self, forKey: .preFixCount)) ?? 0)
+        self.postFixCount = max(0, (try? container.decode(Int.self, forKey: .postFixCount)) ?? 0)
+        self.status = (try? container.decode(String.self, forKey: .status)) ?? "observing"
+        self.sourceAsOf = try? container.decodeIfPresent(String.self, forKey: .sourceAsOf)
+    }
+}
+
+public struct AgentRetroWorkbenchSummary: Codable, Sendable, Equatable {
+    public let coverageStatus: String
+    public let sampleSize: Int
+    public let sourceAsOf: String?
+    public let windowCST: String
+    public let preFixTotal: Int
+    public let postFixTotal: Int
+    public let layers: [AgentRetroLayerRow]
+    public let horizonWaste: AgentHorizonWasteSummary
+    public let skillWatermarks: [AgentRetroSkillWatermark]
+
+    enum CodingKeys: String, CodingKey {
+        case coverageStatus = "coverage_status"
+        case sampleSize = "sample_size"
+        case sourceAsOf = "source_as_of"
+        case windowCST = "window_cst"
+        case preFixTotal = "pre_fix_total"
+        case postFixTotal = "post_fix_total"
+        case layers
+        case horizonWaste = "horizon_waste"
+        case skillWatermarks = "skill_watermarks"
+    }
+
+    public init(
+        coverageStatus: String = "unknown",
+        sampleSize: Int = 0,
+        sourceAsOf: String? = nil,
+        windowCST: String = "14d",
+        preFixTotal: Int = 0,
+        postFixTotal: Int = 0,
+        layers: [AgentRetroLayerRow] = [],
+        horizonWaste: AgentHorizonWasteSummary = AgentHorizonWasteSummary(),
+        skillWatermarks: [AgentRetroSkillWatermark] = []
+    ) {
+        self.coverageStatus = coverageStatus
+        self.sampleSize = max(0, sampleSize)
+        self.sourceAsOf = sourceAsOf
+        self.windowCST = windowCST
+        self.preFixTotal = max(0, preFixTotal)
+        self.postFixTotal = max(0, postFixTotal)
+        self.layers = layers
+        self.horizonWaste = horizonWaste
+        self.skillWatermarks = skillWatermarks.filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedLayers = (try? container.decode([AgentRetroLayerRow].self, forKey: .layers)) ?? []
+        let decodedHorizon = (try? container.decode(AgentHorizonWasteSummary.self, forKey: .horizonWaste))
+            ?? AgentHorizonWasteSummary()
+        let decodedWatermarks = ((try? container.decode([AgentRetroSkillWatermark].self, forKey: .skillWatermarks)) ?? [])
+            .filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        self.coverageStatus = (try? container.decode(String.self, forKey: .coverageStatus)) ?? "unknown"
+        self.sampleSize = max(0, (try? container.decode(Int.self, forKey: .sampleSize)) ?? 0)
+        self.sourceAsOf = try? container.decodeIfPresent(String.self, forKey: .sourceAsOf)
+        self.windowCST = (try? container.decode(String.self, forKey: .windowCST)) ?? "14d"
+        self.preFixTotal = max(
+            0,
+            (try? container.decode(Int.self, forKey: .preFixTotal))
+                ?? decodedLayers.reduce(0) { saturatingAddInt($0, $1.preFixCount) }
+        )
+        self.postFixTotal = max(
+            0,
+            (try? container.decode(Int.self, forKey: .postFixTotal))
+                ?? decodedLayers.reduce(0) { saturatingAddInt($0, $1.postFixCount) }
+        )
+        self.layers = decodedLayers
+        self.horizonWaste = decodedHorizon
+        self.skillWatermarks = decodedWatermarks
+    }
+}
+
 public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
     public let schemaVersion: Int
     public let windowCST: String
@@ -240,6 +560,7 @@ public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
     public let roles: [AgentRoleEfficiencyRow]
     public let roundSummary: AgentRoundDistributionSummary
     public let dailySeries: [AgentDailyEfficiencyPoint]
+    public let agentRetro: AgentRetroWorkbenchSummary?
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -255,6 +576,7 @@ public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
         case roundDistribution = "round_distribution"
         case dailySeries = "daily_series"
         case dailyTrend = "daily_trend"
+        case agentRetro = "agent_retro"
     }
 
     public init(
@@ -267,7 +589,8 @@ public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
         coverageStatus: String = "unknown",
         roles: [AgentRoleEfficiencyRow] = [],
         roundSummary: AgentRoundDistributionSummary = AgentRoundDistributionSummary(),
-        dailySeries: [AgentDailyEfficiencyPoint] = []
+        dailySeries: [AgentDailyEfficiencyPoint] = [],
+        agentRetro: AgentRetroWorkbenchSummary? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.windowCST = windowCST
@@ -279,6 +602,7 @@ public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
         self.roles = roles
         self.roundSummary = roundSummary
         self.dailySeries = dailySeries
+        self.agentRetro = agentRetro
     }
 
     public init(from decoder: Decoder) throws {
@@ -299,6 +623,7 @@ public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
         self.dailySeries = (try? container.decode([AgentDailyEfficiencyPoint].self, forKey: .dailySeries))
             ?? (try? container.decode([AgentDailyEfficiencyPoint].self, forKey: .dailyTrend))
             ?? []
+        self.agentRetro = try? container.decodeIfPresent(AgentRetroWorkbenchSummary.self, forKey: .agentRetro)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -313,6 +638,7 @@ public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
         try container.encode(roles, forKey: .roles)
         try container.encode(roundSummary, forKey: .roundSummary)
         try container.encode(dailySeries, forKey: .dailySeries)
+        try container.encodeIfPresent(agentRetro, forKey: .agentRetro)
     }
 }
 
@@ -2613,6 +2939,21 @@ extension LiveDashboardTelemetryReader {
         }
         if summary.agentEfficiency == nil {
             summary.agentEfficiency = buildFallbackAgentEfficiency(db: db, summary: summary)
+        } else if let current = summary.agentEfficiency, current.agentRetro == nil,
+                  let fallbackRetro = queryFallbackAgentRetro(db: db) {
+            summary.agentEfficiency = AgentEfficiencyWorkbenchSnapshot(
+                schemaVersion: current.schemaVersion,
+                windowCST: current.windowCST,
+                windowStart: current.windowStart,
+                windowEnd: current.windowEnd,
+                sourceAsOf: current.sourceAsOf,
+                sampleSize: current.sampleSize,
+                coverageStatus: current.coverageStatus,
+                roles: current.roles,
+                roundSummary: current.roundSummary,
+                dailySeries: current.dailySeries,
+                agentRetro: fallbackRetro
+            )
         }
     }
 
@@ -2622,7 +2963,8 @@ extension LiveDashboardTelemetryReader {
     ) -> AgentEfficiencyWorkbenchSnapshot? {
         let byRole = queryFallbackRoleRows(db: db)
         let dailyPoints = queryFallbackDailyPoints(db: db)
-        guard !byRole.isEmpty || !dailyPoints.isEmpty else { return nil }
+        let fallbackRetro = queryFallbackAgentRetro(db: db)
+        guard !byRole.isEmpty || !dailyPoints.isEmpty || (fallbackRetro?.sampleSize ?? 0) > 0 else { return nil }
         let orderedKeys = ["m3", "m2", "m1", "designer", "writer", "reviewer", "explorer", "pr_monitor"]
         let roles = orderedKeys.map { key in
             byRole[key] ?? AgentRoleEfficiencyRow(
@@ -2632,10 +2974,10 @@ extension LiveDashboardTelemetryReader {
             )
         }
         let execRoles = roles.filter { ["writer", "reviewer", "designer"].contains($0.roleKey) }
-        let r1Sum = execRoles.reduce(0) { $0 + $1.r1Count }
-        let r2Sum = execRoles.reduce(0) { $0 + $1.r2Count }
-        let r3Sum = execRoles.reduce(0) { $0 + $1.r3PlusCount }
-        let evalTotal = r1Sum + r2Sum + r3Sum
+        let r1Sum = execRoles.reduce(0) { saturatingAddInt($0, $1.r1Count) }
+        let r2Sum = execRoles.reduce(0) { saturatingAddInt($0, $1.r2Count) }
+        let r3Sum = execRoles.reduce(0) { saturatingAddInt($0, $1.r3PlusCount) }
+        let evalTotal = saturatingAddInt(saturatingAddInt(r1Sum, r2Sum), r3Sum)
         let fallbackPass = summary.reviewedTasksCount > 0 ? max(0, 1.0 - summary.r1ReviewFailRate) : nil
         let roundSummary = AgentRoundDistributionSummary(
             r1Count: r1Sum,
@@ -2648,21 +2990,373 @@ extension LiveDashboardTelemetryReader {
             cacheHitRate: summary.cacheHitRate > 0 ? summary.cacheHitRate : nil
         )
         let sampleSize = max(
-            roles.reduce(0) { $0 + $1.runsCount },
-            dailyPoints.reduce(0) { $0 + $1.tasksCompleted }
+            roles.reduce(0) { saturatingAddInt($0, $1.runsCount) },
+            max(dailyPoints.reduce(0) { saturatingAddInt($0, $1.tasksCompleted) }, fallbackRetro?.sampleSize ?? 0)
         )
         return AgentEfficiencyWorkbenchSnapshot(
             schemaVersion: 1,
             windowCST: "14d",
             windowStart: dailyPoints.first?.day,
             windowEnd: dailyPoints.last?.day,
-            sourceAsOf: dailyPoints.last?.day,
+            sourceAsOf: dailyPoints.last?.day ?? fallbackRetro?.sourceAsOf,
             sampleSize: sampleSize,
             coverageStatus: sampleSize > 0 ? "partial" : "unknown",
             roles: roles,
             roundSummary: roundSummary,
-            dailySeries: dailyPoints
+            dailySeries: dailyPoints,
+            agentRetro: fallbackRetro
         )
+    }
+
+    private static let fallbackRetroLayerMeta: [(key: String, zh: String, en: String)] = [
+        ("role", "角色边界", "Role Boundaries"),
+        ("handoff", "交接完整度", "Handoff Completeness"),
+        ("invoke", "工具与参考调用", "Tool & Reference Invocation"),
+        ("exec", "执行与返工收敛", "Execution & Rework Convergence"),
+        ("friction", "人机协作摩擦", "Human-Agent Collaboration Friction"),
+        ("horizon", "长程上下文损耗", "Long-Horizon Context Waste"),
+    ]
+
+    private static func sqliteTableExists(_ db: OpaquePointer, name: String) -> Bool? {
+        let sql = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (name as NSString).utf8String, -1, nil)
+        let rc = sqlite3_step(stmt)
+        if rc == SQLITE_ROW { return true }
+        if rc == SQLITE_DONE { return false }
+        return nil
+    }
+
+    private struct FallbackLayerStats {
+        let pre: Int
+        let post: Int
+        let sessions: Int
+        let role: String?
+        let skill: String?
+        let ver: String?
+        let asOf: String?
+    }
+
+    private struct FallbackHorizonRawRow {
+        let cat: String
+        let rkey: String
+        let skill: String
+        let turns: Int
+        let toks: UInt64
+        let dur: Double
+    }
+
+    private static func queryFallbackAgentRetro(db: OpaquePointer) -> AgentRetroWorkbenchSummary? {
+        let emptyLayers = fallbackRetroLayerMeta.map {
+            AgentRetroLayerRow(layerKey: $0.key, labelZh: $0.zh, labelEn: $0.en)
+        }
+        guard let hasFindings = sqliteTableExists(db, name: "fact_agent_retro_finding"),
+              let hasHorizon = sqliteTableExists(db, name: "fact_agent_horizon_waste") else {
+            return AgentRetroWorkbenchSummary(coverageStatus: "error", sampleSize: 0, layers: emptyLayers)
+        }
+        guard hasFindings || hasHorizon else {
+            return AgentRetroWorkbenchSummary(coverageStatus: "missing", sampleSize: 0, layers: emptyLayers)
+        }
+
+        let findings: ([String: FallbackLayerStats], Int, [AgentRetroSkillWatermark])
+        if hasFindings {
+            guard let queried = queryFallbackRetroFindings(db: db) else {
+                return AgentRetroWorkbenchSummary(coverageStatus: "error", sampleSize: 0, layers: emptyLayers)
+            }
+            findings = queried
+        } else {
+            findings = ([:], 0, [])
+        }
+
+        let horizon: ([AgentHorizonWasteItem], Int, String?)
+        if hasHorizon {
+            guard let queried = queryFallbackHorizonWaste(db: db) else {
+                return AgentRetroWorkbenchSummary(coverageStatus: "error", sampleSize: 0, layers: emptyLayers)
+            }
+            horizon = queried
+        } else {
+            horizon = ([], 0, nil)
+        }
+
+        return assembleFallbackAgentRetro(
+            byLayer: findings.0,
+            distinctSessionSample: max(findings.1, horizon.1),
+            watermarks: findings.2,
+            horizonItems: horizon.0,
+            horizonAsOf: horizon.2
+        )
+    }
+
+    private static func queryFallbackRetroFindings(
+        db: OpaquePointer
+    ) -> ([String: FallbackLayerStats], Int, [AgentRetroSkillWatermark])? {
+        var byLayer: [String: FallbackLayerStats] = [:]
+        var distinctSessionSample = 0
+        let popSQL = """
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_retro_finding WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT COUNT(DISTINCT f.session_id)
+        FROM fact_agent_retro_finding AS f
+        CROSS JOIN anchor AS a
+        WHERE f.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day;
+        """
+        var popStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, popSQL, -1, &popStmt, nil) == SQLITE_OK, let popStmt else { return nil }
+        defer { sqlite3_finalize(popStmt) }
+        let popRC = sqlite3_step(popStmt)
+        if popRC == SQLITE_ROW {
+            distinctSessionSample = max(0, Int(sqlite3_column_int64(popStmt, 0)))
+        } else if popRC != SQLITE_DONE {
+            return nil
+        }
+
+        let layerSQL = """
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_retro_finding WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT f.layer_key,
+               SUM(CASE WHEN f.is_post_fix = 0 THEN f.occurrence_count ELSE 0 END),
+               SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END),
+               COUNT(DISTINCT f.session_id),
+               MAX(f.role_key), MAX(f.skill), MAX(f.skill_version), MAX(f.cst_day)
+        FROM fact_agent_retro_finding AS f
+        CROSS JOIN anchor AS a
+        WHERE f.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day
+        GROUP BY f.layer_key;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, layerSQL, -1, &stmt, nil) == SQLITE_OK, let stmt else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        while true {
+            let stepRC = sqlite3_step(stmt)
+            if stepRC == SQLITE_DONE { break }
+            guard stepRC == SQLITE_ROW else { return nil }
+            guard let kPtr = sqlite3_column_text(stmt, 0) else { continue }
+            let key = String(cString: kPtr)
+            byLayer[key] = FallbackLayerStats(
+                pre: max(0, Int(sqlite3_column_int64(stmt, 1))),
+                post: max(0, Int(sqlite3_column_int64(stmt, 2))),
+                sessions: max(0, Int(sqlite3_column_int64(stmt, 3))),
+                role: sqlite3_column_text(stmt, 4).map { String(cString: $0) },
+                skill: sqlite3_column_text(stmt, 5).map { String(cString: $0) },
+                ver: sqlite3_column_text(stmt, 6).map { String(cString: $0) },
+                asOf: sqlite3_column_text(stmt, 7).map { String(cString: $0) }
+            )
+        }
+        guard let watermarks = queryFallbackRetroWatermarks(db: db) else { return nil }
+        return (byLayer, distinctSessionSample, watermarks)
+    }
+
+    private static func queryFallbackRetroWatermarks(db: OpaquePointer) -> [AgentRetroSkillWatermark]? {
+        let wmSQL = """
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_retro_finding WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        ),
+        windowed AS (
+            SELECT f.skill, f.skill_version, f.is_post_fix, f.occurrence_count, f.cst_day, f.rowid AS rid
+            FROM fact_agent_retro_finding AS f
+            CROSS JOIN anchor AS a
+            WHERE f.cst_day BETWEEN date(a.end_day, '-29 days') AND a.end_day
+        ),
+        latest_ver AS (
+            SELECT w.skill,
+                   w.skill_version,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY w.skill
+                       ORDER BY CASE WHEN w.skill_version IS NOT NULL AND w.skill_version != '' THEN 0 ELSE 1 END ASC,
+                                w.cst_day DESC, w.rid DESC
+                   ) AS rn
+            FROM windowed AS w
+        )
+        SELECT w.skill,
+               lv.skill_version,
+               SUM(CASE WHEN w.is_post_fix = 0 THEN w.occurrence_count ELSE 0 END),
+               SUM(CASE WHEN w.is_post_fix = 1 THEN w.occurrence_count ELSE 0 END),
+               MAX(w.cst_day)
+        FROM windowed AS w
+        LEFT JOIN latest_ver AS lv ON lv.skill = w.skill AND lv.rn = 1
+        GROUP BY w.skill, lv.skill_version
+        ORDER BY SUM(CASE WHEN w.is_post_fix = 1 THEN w.occurrence_count ELSE 0 END) DESC,
+                 SUM(w.occurrence_count) DESC, w.skill ASC;
+        """
+        var watermarks: [AgentRetroSkillWatermark] = []
+        var wmStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, wmSQL, -1, &wmStmt, nil) == SQLITE_OK, let wmStmt else { return nil }
+        defer { sqlite3_finalize(wmStmt) }
+        while true {
+            let stepRC = sqlite3_step(wmStmt)
+            if stepRC == SQLITE_DONE { break }
+            guard stepRC == SQLITE_ROW else { return nil }
+            guard let skPtr = sqlite3_column_text(wmStmt, 0) else { continue }
+            let sk = String(cString: skPtr)
+            let ver = sqlite3_column_text(wmStmt, 1).map { String(cString: $0) }
+            let pre = max(0, Int(sqlite3_column_int64(wmStmt, 2)))
+            let post = max(0, Int(sqlite3_column_int64(wmStmt, 3)))
+            let asOf = sqlite3_column_text(wmStmt, 4).map { String(cString: $0) }
+            let status = classifyFallbackWatermarkStatus(pre: pre, post: post, version: ver)
+            watermarks.append(AgentRetroSkillWatermark(skill: sk, skillVersion: ver, preFixCount: pre, postFixCount: post, status: status, sourceAsOf: asOf))
+        }
+        return watermarks
+    }
+
+    private static func classifyFallbackWatermarkStatus(pre: Int, post: Int, version: String?) -> String {
+        if post > 0 && pre > 0 { return post >= pre ? "regressed" : "observing" }
+        if post > 0 { return "regressed" }
+        if pre > 0 { return "improved" }
+        return version != nil ? "baseline" : "observing"
+    }
+
+    private static func queryFallbackHorizonWaste(db: OpaquePointer) -> ([AgentHorizonWasteItem], Int, String?)? {
+        var popSessions = 0
+        let popSQL = """
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_horizon_waste WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT COUNT(DISTINCT w.session_id)
+        FROM fact_agent_horizon_waste AS w
+        CROSS JOIN anchor AS a
+        WHERE w.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day;
+        """
+        var popStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, popSQL, -1, &popStmt, nil) == SQLITE_OK, let popStmt else { return nil }
+        defer { sqlite3_finalize(popStmt) }
+        let popRC = sqlite3_step(popStmt)
+        if popRC == SQLITE_ROW {
+            popSessions = max(0, Int(sqlite3_column_int64(popStmt, 0)))
+        } else if popRC != SQLITE_DONE {
+            return nil
+        }
+
+        let hzSQL = """
+        WITH anchor AS (
+            SELECT COALESCE(
+                (SELECT MAX(cst_day) FROM fact_agent_horizon_waste WHERE cst_day IS NOT NULL),
+                date('now', '+8 hours')
+            ) AS end_day
+        )
+        SELECT w.category_key, w.role_key, w.skill, SUM(w.wasted_turns), SUM(w.wasted_tokens), ROUND(SUM(w.duration_sec), 1), MAX(w.cst_day)
+        FROM fact_agent_horizon_waste AS w
+        CROSS JOIN anchor AS a
+        WHERE w.cst_day BETWEEN date(a.end_day, '-13 days') AND a.end_day
+        GROUP BY w.category_key, w.role_key, w.skill
+        ORDER BY SUM(w.wasted_tokens) DESC, SUM(w.wasted_turns) DESC;
+        """
+        var hzStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, hzSQL, -1, &hzStmt, nil) == SQLITE_OK, let hzStmt else { return nil }
+        defer { sqlite3_finalize(hzStmt) }
+        var rawRows: [FallbackHorizonRawRow] = []
+        var grandTokens: UInt64 = 0
+        var horizonAsOf: String?
+        while true {
+            let stepRC = sqlite3_step(hzStmt)
+            if stepRC == SQLITE_DONE { break }
+            guard stepRC == SQLITE_ROW else { return nil }
+            let row = FallbackHorizonRawRow(
+                cat: sqlite3_column_text(hzStmt, 0).map { String(cString: $0) } ?? "context_carry",
+                rkey: sqlite3_column_text(hzStmt, 1).map { String(cString: $0) } ?? "writer",
+                skill: sqlite3_column_text(hzStmt, 2).map { String(cString: $0) } ?? "unmeasured",
+                turns: max(0, Int(sqlite3_column_int64(hzStmt, 3))),
+                toks: UInt64(max(0, sqlite3_column_int64(hzStmt, 4))),
+                dur: max(0, sqlite3_column_double(hzStmt, 5))
+            )
+            if let dPtr = sqlite3_column_text(hzStmt, 6) {
+                let dStr = String(cString: dPtr)
+                if horizonAsOf == nil || dStr > (horizonAsOf ?? "") { horizonAsOf = dStr }
+            }
+            grandTokens = saturatingAddUInt64(grandTokens, row.toks)
+            rawRows.append(row)
+        }
+        let items = rawRows.map { row -> AgentHorizonWasteItem in
+            let (zh, en) = defaultHorizonCategoryLabels(for: row.cat)
+            let pct = grandTokens > 0 ? (100.0 * Double(row.toks) / Double(grandTokens)) : 0
+            return AgentHorizonWasteItem(
+                categoryKey: row.cat, labelZh: zh, labelEn: en, roleKey: row.rkey,
+                roleLabelZh: defaultRoleLabelZh(for: row.rkey), roleLabelEn: defaultRoleLabelEn(for: row.rkey),
+                skill: row.skill, wastedTurns: row.turns, wastedTokens: row.toks, durationSec: row.dur, tokenSharePct: pct
+            )
+        }
+        return (items, popSessions, horizonAsOf)
+    }
+
+    private static func assembleFallbackAgentRetro(
+        byLayer: [String: FallbackLayerStats],
+        distinctSessionSample: Int,
+        watermarks: [AgentRetroSkillWatermark],
+        horizonItems: [AgentHorizonWasteItem],
+        horizonAsOf: String?
+    ) -> AgentRetroWorkbenchSummary {
+        var preTotal = 0
+        var postTotal = 0
+        var asOfCandidates: [String] = horizonAsOf.map { [$0] } ?? []
+        let layers = fallbackRetroLayerMeta.map { meta -> AgentRetroLayerRow in
+            let row = byLayer[meta.key]
+            let pre = row?.pre ?? 0
+            let post = row?.post ?? 0
+            preTotal = saturatingAddInt(preTotal, pre)
+            postTotal = saturatingAddInt(postTotal, post)
+            if let asOf = row?.asOf { asOfCandidates.append(asOf) }
+            let rKey = row?.role
+            return AgentRetroLayerRow(
+                layerKey: meta.key, labelZh: meta.zh, labelEn: meta.en,
+                preFixCount: pre, postFixCount: post, totalCount: saturatingAddInt(pre, post),
+                affectedSessions: row?.sessions ?? 0, topRoleKey: rKey,
+                topRoleLabelZh: rKey.map(defaultRoleLabelZh), topRoleLabelEn: rKey.map(defaultRoleLabelEn),
+                topSkill: row?.skill, topSkillVersion: row?.ver
+            )
+        }
+        let hasObserved = preTotal > 0 || postTotal > 0 || !horizonItems.isEmpty
+        let sample = distinctSessionSample > 0
+            ? distinctSessionSample
+            : (hasObserved ? max(1, horizonItems.count) : 0)
+        let cov: String
+        if sample == 0 && preTotal == 0 && postTotal == 0 && horizonItems.isEmpty {
+            cov = "unknown"
+        } else if ((preTotal > 0 || postTotal > 0) && horizonItems.isEmpty) || (!horizonItems.isEmpty && preTotal == 0 && postTotal == 0) {
+            cov = "partial"
+        } else {
+            cov = "healthy"
+        }
+        return AgentRetroWorkbenchSummary(
+            coverageStatus: cov,
+            sampleSize: sample,
+            sourceAsOf: asOfCandidates.max(),
+            windowCST: "14d",
+            preFixTotal: preTotal,
+            postFixTotal: postTotal,
+            layers: layers,
+            horizonWaste: AgentHorizonWasteSummary(
+                wastedTurnsTotal: horizonItems.reduce(0) { saturatingAddInt($0, $1.wastedTurns) },
+                wastedTokensTotal: horizonItems.reduce(UInt64(0)) { saturatingAddUInt64($0, $1.wastedTokens) },
+                items: horizonItems
+            ),
+            skillWatermarks: watermarks
+        )
+    }
+
+    private static func defaultHorizonCategoryLabels(for key: String) -> (String, String) {
+        switch key {
+        case "context_carry": return ("只读状态轮询可收编脚本", "Read-Only Status Polling Scriptable")
+        case "wakeup_parallelism": return ("唤醒延迟与串行排队", "Wakeup Lag & Serial Queueing")
+        case "rework_verify": return ("缺内环快测致外环返工", "Outer-Loop Rework Missing Fast Check")
+        case "fatigue_inflection": return ("重复全量重读可改增量", "Repeated Full Re-Reads Replaceable by Delta")
+        case "steering_overkill": return ("高阶模型做机械活可降档", "High-Tier Model Mechanical Work Downgradable")
+        default: return ("长程上下文损耗", "Long-Horizon Context Waste")
+        }
     }
 
     private static func queryFallbackRoleRows(db: OpaquePointer) -> [String: AgentRoleEfficiencyRow] {

@@ -2384,5 +2384,289 @@ struct DashboardWorkspaceTests {
         #expect(!SkillsRoiDiagnosticsCardView.aggregateObservationsAvailable(in: errorReport))
         #expect(SkillsRoiDiagnosticsCardView.activeVsTotalCounts(in: errorReport) == nil)
     }
+
+    @Test("AgentEfficiencyWorkbenchSnapshot decodes agent_retro 6-layer trajectory, horizon waste, and watermarks with v1 compatibility and renders 4x2 PNGs")
+    func agentRetroSnapshotDecodesScrubsCodesAndRendersFourByTwoPNGs() throws {
+        // 1. v1 backward compatibility: omitting agent_retro decodes nil cleanly
+        let legacyJSON = """
+        {"schema_version": 1, "window_cst": "14d", "sample_size": 10, "coverage_status": "healthy"}
+        """
+        let legacyDecoded = try JSONDecoder().decode(AgentEfficiencyWorkbenchSnapshot.self, from: Data(legacyJSON.utf8))
+        #expect(legacyDecoded.agentRetro == nil)
+
+        // 2. Full v2 agent_retro decoding + SkillsPseudoSkillGuard scrubbing
+        let v2JSON = """
+        {
+          "contract": "aidash-agent-efficiency/v1",
+          "schema_version": 1,
+          "window_cst": "14d",
+          "source_as_of": "2026-11-24",
+          "sample_size": 64,
+          "coverage_status": "healthy",
+          "roles": [
+            {"role_key": "m1", "role_label": "Goal 主控 (TL)", "role_label_en": "Goal Lead (TL)", "runs_count": 20, "goals_count": 8, "tasks_count": 16, "r1_count": 14, "r2_count": 2, "r3_plus_count": 0, "r1_pass_rate": 0.875, "median_duration_sec": 920.0, "p90_duration_sec": 1800.0, "estimated_tokens": 8000000, "token_share_pct": 25.0},
+            {"role_key": "writer", "role_label": "编码实现 (Writer)", "role_label_en": "Code Implementation (Writer)", "runs_count": 28, "goals_count": 8, "tasks_count": 20, "r1_count": 17, "r2_count": 2, "r3_plus_count": 1, "r1_pass_rate": 0.85, "median_duration_sec": 1200.0, "p90_duration_sec": 2400.0, "estimated_tokens": 16000000, "token_share_pct": 50.0},
+            {"role_key": "reviewer", "role_label": "独立审查 (Reviewer)", "role_label_en": "Independent Review (Reviewer)", "runs_count": 16, "goals_count": 8, "tasks_count": 16, "r1_count": 14, "r2_count": 2, "r3_plus_count": 0, "r1_pass_rate": 0.875, "median_duration_sec": 540.0, "p90_duration_sec": 1100.0, "estimated_tokens": 8000000, "token_share_pct": 25.0}
+          ],
+          "round_summary": {
+            "r1_count": 31,
+            "r2_count": 4,
+            "r3_plus_count": 1,
+            "evaluated_tasks": 36,
+            "r1_pass_rate": 0.8611,
+            "median_duration_sec": 980.0,
+            "p90_duration_sec": 2400.0,
+            "steering_token_share": 0.25,
+            "ttft_p90_sec": 3.4,
+            "cache_hit_rate": 0.88
+          },
+          "daily_series": [
+            {"day": "2026-11-23", "goals_completed": 4, "tasks_completed": 10, "r1_count": 9, "r2_count": 1, "r3_plus_count": 0, "r1_pass_rate": 0.9, "median_duration_sec": 960.0, "p90_duration_sec": 2100.0, "blocked_events": 0, "steering_tokens": 3000000, "coding_tokens": 9000000, "total_tokens": 12000000},
+            {"day": "2026-11-24", "goals_completed": 4, "tasks_completed": 12, "r1_count": 10, "r2_count": 2, "r3_plus_count": 0, "r1_pass_rate": 0.8333, "median_duration_sec": 1020.0, "p90_duration_sec": 2300.0, "blocked_events": 1, "steering_tokens": 4000000, "coding_tokens": 11000000, "total_tokens": 15000000}
+          ],
+          "agent_retro": {
+            "coverage_status": "healthy",
+            "sample_size": 18,
+            "source_as_of": "2026-11-24",
+            "window_cst": "14d",
+            "pre_fix_total": 9,
+            "post_fix_total": 1,
+            "layers": [
+              {"layer_key": "role", "label_zh": "角色边界", "label_en": "Role Boundaries", "pre_fix_count": 3, "post_fix_count": 0, "total_count": 3, "affected_sessions": 2, "top_role_key": "m2", "top_skill": "m2-dispatcher", "top_skill_version": "v5@abc1234"},
+              {"layer_key": "handoff", "label_zh": "交接完整度", "label_en": "Handoff Completeness", "pre_fix_count": 2, "post_fix_count": 0, "total_count": 2, "affected_sessions": 2, "top_role_key": "m1", "top_skill": "team-lead", "top_skill_version": "v22@1234abc"},
+              {"layer_key": "invoke", "label_zh": "工具与参考调用", "label_en": "Tool & Reference Invocation", "pre_fix_count": 2, "post_fix_count": 1, "total_count": 3, "affected_sessions": 2, "top_role_key": "explorer", "top_skill": "agent-retro", "top_skill_version": "v9@def5678"},
+              {"layer_key": "exec", "label_zh": "执行与返工收敛", "label_en": "Execution & Rework Convergence", "pre_fix_count": 1, "post_fix_count": 0, "total_count": 1, "affected_sessions": 1, "top_role_key": "writer", "top_skill": "xcode-cli", "top_skill_version": "v7@7890fed"},
+              {"layer_key": "friction", "label_zh": "人机协作摩擦", "label_en": "Human-Agent Collaboration Friction", "pre_fix_count": 1, "post_fix_count": 0, "total_count": 1, "affected_sessions": 1, "top_role_key": "m1", "top_skill": "my-designer", "top_skill_version": "v14@4567cba"},
+              {"layer_key": "horizon", "label_zh": "长程上下文损耗", "label_en": "Long-Horizon Context Waste", "pre_fix_count": 0, "post_fix_count": 0, "total_count": 0, "affected_sessions": 0}
+            ],
+            "horizon_waste": {
+              "wasted_turns_total": 12,
+              "wasted_tokens_total": 28400,
+              "items": [
+                {"category_key": "context_carry", "label_zh": "只读状态轮询可收编脚本", "label_en": "Read-Only Status Polling Scriptable", "role_key": "m1", "role_label_zh": "Goal 主控 (TL)", "role_label_en": "Goal Lead (TL)", "skill": "agent-retro", "wasted_turns": 6, "wasted_tokens": 16000, "duration_sec": 42.0, "token_share_pct": 56.34},
+                {"category_key": "fatigue_inflection", "label_zh": "重复全量重读可改增量", "label_en": "Repeated Full Re-Reads Replaceable by Delta", "role_key": "writer", "role_label_zh": "编码实现 (Writer)", "role_label_en": "Code Implementation (Writer)", "skill": "my-designer", "wasted_turns": 4, "wasted_tokens": 8400, "duration_sec": 24.0, "token_share_pct": 29.58},
+                {"category_key": "steering_overkill", "label_zh": "高阶模型做机械活可降档", "label_en": "High-Tier Model Mechanical Work Downgradable", "role_key": "m1", "role_label_zh": "Goal 主控 (TL)", "role_label_en": "Goal Lead (TL)", "skill": "team-lead", "wasted_turns": 2, "wasted_tokens": 4000, "duration_sec": 15.0, "token_share_pct": 14.08}
+              ]
+            },
+            "skill_watermarks": [
+              {"skill": "m2-dispatcher", "skill_version": "v5@abc1234", "pre_fix_count": 3, "post_fix_count": 0, "status": "improved"},
+              {"skill": "agent-retro", "skill_version": "v9@def5678", "pre_fix_count": 2, "post_fix_count": 1, "status": "observing"},
+              {"skill": "tests", "skill_version": "v1@bad0000", "pre_fix_count": 5, "post_fix_count": 5, "status": "regressed"}
+            ]
+          }
+        }
+        """
+        let decoded = try JSONDecoder().decode(AgentEfficiencyWorkbenchSnapshot.self, from: Data(v2JSON.utf8))
+        let retro = try #require(decoded.agentRetro)
+        #expect(retro.coverageStatus == "healthy")
+        #expect(retro.sampleSize == 18)
+        #expect(retro.preFixTotal == 9)
+        #expect(retro.postFixTotal == 1)
+        #expect(retro.layers.count == 6)
+        #expect(retro.horizonWaste.wastedTurnsTotal == 12)
+        #expect(retro.horizonWaste.wastedTokensTotal == 28_400)
+        // Pseudo-skill "tests" filtered out automatically
+        #expect(retro.skillWatermarks.map(\.skill) == ["m2-dispatcher", "agent-retro"])
+
+        // 3. SkillsPseudoSkillGuard scrubs S1..S12, M1..M5, L0..L3, R1..R4, H1..H5, HZN1..HZN5 while preserving hyphenated slugs
+        let scrubbed = SkillsPseudoSkillGuard.scrubAcademicCodes(
+            "S10 M2 L2 R1_m3 R2 H1_handoff H4 HZN1 HZN5_polling m2-dispatcher plain summary"
+        )
+        #expect(scrubbed == "m2-dispatcher plain summary")
+
+        // 3b. Warehouse fallback enforces 14d CST window on findings/horizon, 30d on watermarks, and degrades to error on malformed schema
+        let retroWhHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-retro-wh-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: retroWhHome) }
+        let retroWhDir = retroWhHome.appendingPathComponent("Development/AIDash/aidata/L3_merge", isDirectory: true)
+        try FileManager.default.createDirectory(at: retroWhDir, withIntermediateDirectories: true)
+        let retroWhURL = retroWhDir.appendingPathComponent("warehouse.db")
+        var retroDB: OpaquePointer?
+        #expect(sqlite3_open(retroWhURL.path, &retroDB) == SQLITE_OK)
+        if let retroDB {
+            let sql = """
+            CREATE TABLE fact_agent_retro_finding (
+                finding_uid TEXT PRIMARY KEY, session_id TEXT, role_key TEXT, skill TEXT,
+                layer_key TEXT, skill_version TEXT, is_post_fix INTEGER, occurrence_count INTEGER, cst_day TEXT
+            );
+            CREATE TABLE fact_agent_horizon_waste (
+                waste_uid TEXT PRIMARY KEY, session_id TEXT, role_key TEXT, skill TEXT,
+                category_key TEXT, wasted_turns INTEGER, wasted_tokens INTEGER, duration_sec REAL, cst_day TEXT
+            );
+            INSERT INTO fact_agent_retro_finding VALUES ('old-f', 's-old', 'm2', 'm2-dispatcher', 'role', 'v4@old', 0, 99, '2026-10-01');
+            INSERT INTO fact_agent_retro_finding VALUES ('wm-f', 's-wm', 'm2', 'm2-dispatcher', 'role', 'v5@abc1234', 0, 4, '2026-11-05');
+            INSERT INTO fact_agent_retro_finding VALUES ('cur-f', 's-cur', 'explorer', 'agent-retro', 'invoke', 'v9@def5678', 1, 2, '2026-11-24');
+            INSERT INTO fact_agent_horizon_waste VALUES ('old-w', 's-old', 'm1', 'team-lead', 'context_carry', 50, 90000, 120.0, '2026-10-01');
+            INSERT INTO fact_agent_horizon_waste VALUES ('cur-w', 's-cur', 'm1', 'agent-retro', 'context_carry', 3, 9000, 20.0, '2026-11-24');
+            """
+            #expect(sqlite3_exec(retroDB, sql, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(retroDB)
+        }
+        let whFallback = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: retroWhHome)?.agentEfficiency?.agentRetro)
+        #expect(whFallback.coverageStatus == "healthy")
+        // Only 2026-11-24 is inside the 14d window [2026-11-11..2026-11-24]; 2026-10-01 (99) and 2026-11-05 (4) are excluded from 14d layers!
+        #expect(whFallback.preFixTotal == 0)
+        #expect(whFallback.postFixTotal == 2)
+        #expect(whFallback.horizonWaste.wastedTurnsTotal == 3)
+        #expect(whFallback.horizonWaste.wastedTokensTotal == 9_000)
+        // 2026-11-05 IS inside the 30d watermark window [2026-10-26..2026-11-24], while 2026-10-01 is excluded!
+        let wmMap = Dictionary(uniqueKeysWithValues: whFallback.skillWatermarks.map { ($0.skill, $0) })
+        #expect(wmMap["m2-dispatcher"]?.preFixCount == 4)
+
+        // Malformed horizon table -> coverageStatus == "error" instead of fabricated empty/partial
+        let brokenHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-retro-broken-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: brokenHome) }
+        let brokenWhDir = brokenHome.appendingPathComponent("Development/AIDash/aidata/L3_merge", isDirectory: true)
+        try FileManager.default.createDirectory(at: brokenWhDir, withIntermediateDirectories: true)
+        let brokenWhURL = brokenWhDir.appendingPathComponent("warehouse.db")
+        var brokenDB: OpaquePointer?
+        #expect(sqlite3_open(brokenWhURL.path, &brokenDB) == SQLITE_OK)
+        if let brokenDB {
+            let brokenSQL = """
+            CREATE TABLE fact_gtt_task_run (goal_uid TEXT, goal_id TEXT, task_id TEXT, role_name TEXT, round_no INTEGER, v5_verdict TEXT);
+            INSERT INTO fact_gtt_task_run VALUES ('m:g1', 'g1', 'T1', 'writer', 1, 'PASS');
+            CREATE TABLE fact_agent_retro_finding (
+                finding_uid TEXT PRIMARY KEY, session_id TEXT, role_key TEXT, skill TEXT,
+                layer_key TEXT, skill_version TEXT, is_post_fix INTEGER, occurrence_count INTEGER, cst_day TEXT
+            );
+            INSERT INTO fact_agent_retro_finding VALUES ('f1', 's1', 'm2', 'm2-dispatcher', 'role', 'v5@abc', 0, 2, '2026-11-24');
+            CREATE TABLE fact_agent_horizon_waste (broken_col INTEGER);
+            """
+            #expect(sqlite3_exec(brokenDB, brokenSQL, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(brokenDB)
+        }
+        let brokenRetro = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: brokenHome)?.agentEfficiency?.agentRetro)
+        #expect(brokenRetro.coverageStatus == "error")
+
+        // 3c. Extreme integer counts in external JSON saturate at Int.max / UInt64.max without overflow traps
+        let extremeJSON = """
+        {
+          "coverage_status": "healthy",
+          "sample_size": 1,
+          "layers": [
+            {"layer_key": "role", "label_zh": "角色边界", "label_en": "Role Boundaries", "pre_fix_count": 9223372036854775807, "post_fix_count": 5},
+            {"layer_key": "invoke", "label_zh": "工具与参考调用", "label_en": "Tool & Reference Invocation", "pre_fix_count": 10, "post_fix_count": 9223372036854775807}
+          ],
+          "horizon_waste": {
+            "items": [
+              {"category_key": "context_carry", "label_zh": "a", "label_en": "a", "wasted_turns": 9223372036854775807, "wasted_tokens": 18446744073709551615},
+              {"category_key": "rework_verify", "label_zh": "b", "label_en": "b", "wasted_turns": 10, "wasted_tokens": 100}
+            ]
+          }
+        }
+        """
+        let extremeRetro = try JSONDecoder().decode(AgentRetroWorkbenchSummary.self, from: Data(extremeJSON.utf8))
+        #expect(extremeRetro.layers.first?.totalCount == Int.max)
+        #expect(extremeRetro.preFixTotal == Int.max)
+        #expect(extremeRetro.postFixTotal == Int.max)
+        #expect(extremeRetro.horizonWaste.wastedTurnsTotal == Int.max)
+        #expect(extremeRetro.horizonWaste.wastedTokensTotal == UInt64.max)
+
+        // 4. SkillsRoiReport decodes skill_retro.agent_retro_watermarks and surfaces cured roadblocks
+        let skillsWatermarkJSON = """
+        {
+          "metadata": {"sample_size": 18, "coverage_status": "healthy"},
+          "diagnostics": {},
+          "skill_retro": {
+            "sample_size": 18,
+            "agent_retro_watermarks": [
+              {"skill": "agent-retro", "skill_version": "v9@def5678", "pre_fix_count": 4, "post_fix_count": 0, "status": "improved"},
+              {"skill": "pull", "skill_version": "v1@0000", "pre_fix_count": 2, "post_fix_count": 0, "status": "improved"}
+            ]
+          }
+        }
+        """
+        let wmReport = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(skillsWatermarkJSON.utf8))
+        #expect(wmReport.resolvedSkillRetro.agentRetroWatermarks.map(\.skill) == ["agent-retro"])
+        #expect(SkillsRoiDiagnosticsCardView.curedRoadblocks(in: wmReport).map(\.skill) == ["agent-retro"])
+
+        // 5. Strict source & xcstrings check: zero bare internal codes in AgentRetroTrajectoryPanelsView
+        let panelSourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/Scenes/AgentRetroTrajectoryPanelsView.swift")
+        let panelSource = try String(contentsOf: panelSourceURL, encoding: .utf8)
+        let forbiddenRegex = try NSRegularExpression(
+            pattern: #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?|python3|skill_contract\.py|skill_retro\.py|agent_retro\.py|session_id|SKILL\.md|inspector)\b"#
+        )
+        let panelMatches = forbiddenRegex.matches(
+            in: panelSource,
+            range: NSRange(panelSource.startIndex..<panelSource.endIndex, in: panelSource)
+        )
+        #expect(panelMatches.isEmpty, "Found forbidden internal codes in AgentRetroTrajectoryPanelsView.swift")
+
+        // 6. Render 4 states x 2 appearances PNGs via ImageRenderer
+        let env = ProcessInfo.processInfo.environment
+        let configuredDir: String? = [
+            env["AIDASH_AGENT_RETRO_SCREENSHOT_DIR"],
+            env["TEST_RUNNER_AIDASH_AGENT_RETRO_SCREENSHOT_DIR"],
+        ].compactMap { val -> String? in
+            guard let val, !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return val
+        }.first
+        let ownsOut = configuredDir == nil
+        let outDir = configuredDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("aidash-agent-retro-shots-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if ownsOut { try? FileManager.default.removeItem(at: outDir) }
+        }
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        var partialRetro = retro
+        partialRetro = AgentRetroWorkbenchSummary(
+            coverageStatus: "partial",
+            sampleSize: 6,
+            sourceAsOf: "2026-11-24",
+            windowCST: "14d",
+            preFixTotal: retro.preFixTotal,
+            postFixTotal: retro.postFixTotal,
+            layers: retro.layers,
+            horizonWaste: AgentHorizonWasteSummary(),
+            skillWatermarks: retro.skillWatermarks
+        )
+        let emptyRetro = AgentRetroWorkbenchSummary(coverageStatus: "unknown", sampleSize: 0, layers: retro.layers)
+        let degradedRetro = AgentRetroWorkbenchSummary(coverageStatus: "missing", sampleSize: 0, layers: retro.layers)
+
+        let makeEffSummary: (AgentRetroWorkbenchSummary, String) -> LiveDashboardTelemetryReader.LiveEfficiencySummary = { r, topCov in
+            var s = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+            s.agentEfficiency = AgentEfficiencyWorkbenchSnapshot(
+                schemaVersion: 1,
+                windowCST: "14d",
+                sourceAsOf: "2026-11-24",
+                sampleSize: decoded.sampleSize,
+                coverageStatus: topCov,
+                roles: decoded.roles,
+                roundSummary: decoded.roundSummary,
+                dailySeries: decoded.dailySeries,
+                agentRetro: r
+            )
+            return s
+        }
+
+        let stateMatrix: [(String, LiveDashboardTelemetryReader.LiveEfficiencySummary)] = [
+            ("populated", makeEffSummary(retro, "healthy")),
+            ("partial", makeEffSummary(partialRetro, "partial")),
+            ("empty", makeEffSummary(emptyRetro, "healthy")),
+            ("degraded", makeEffSummary(degradedRetro, "error")),
+        ]
+        for (stateName, stateSummary) in stateMatrix {
+            for scheme in [ColorScheme.light, ColorScheme.dark] {
+                let appearance = scheme == .dark ? "dark" : "light"
+                let card = AgentEfficiencyChartsCardView(summary: stateSummary)
+                    .frame(width: 1080)
+                    .padding(16)
+                    .background(Color(nsColor: .underPageBackgroundColor))
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.theme, Theme(isDark: scheme == .dark))
+                let bmp = try toolbarHeaderBitmap(for: card, scheme: scheme)
+                let png = try #require(bmp.representation(using: .png, properties: [:]))
+                #expect(!png.isEmpty)
+                #expect(bmp.pixelsWide >= 1000)
+                #expect(bmp.pixelsHigh >= 180)
+                try png.write(to: outDir.appendingPathComponent("agent-retro-\(stateName)-\(appearance).png"))
+            }
+        }
+    }
 }
 #endif
