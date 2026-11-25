@@ -5,7 +5,7 @@ pipeline. It is not a daily card or an app-side judge.
 
 ## Locked defaults
 
-- `ACTIVE_SKILLS` is the explicit 25-package registry, including repository-local
+- `ACTIVE_SKILLS` is the explicit 26-package registry, including `agent-retro` and repository-local
   `aidash-content`; filesystem discovery never changes the denominator.
 - Behavioral eligibility requires a valid registered skill, source/session/time,
   same-source prompt linkage, assistant activity, a closed 30-minute observation

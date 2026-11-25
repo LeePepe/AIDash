@@ -234,6 +234,15 @@ def test_unpriced_models_include_gateway_models():
 
 
 @pytest.mark.unit
+def test_agent_retro_registered_in_quality_contracts():
+    import quality_contracts
+
+    assert "agent-retro" in quality_contracts.ACTIVE_SKILLS
+    assert quality_contracts.canonical_skill("agent-retro") == "agent-retro"
+    assert any(row["skill"] == "agent-retro" for row in quality_contracts.registry_rows())
+
+
+@pytest.mark.unit
 def test_raw_source_lock_serializes_concurrent_writes_and_times_out_when_held(tmp_path, monkeypatch):
     import fcntl
 
