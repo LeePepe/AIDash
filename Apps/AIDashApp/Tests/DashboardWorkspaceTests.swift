@@ -2539,6 +2539,30 @@ struct DashboardWorkspaceTests {
         let brokenRetro = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: brokenHome)?.agentEfficiency?.agentRetro)
         #expect(brokenRetro.coverageStatus == "error")
 
+        // 3c. Extreme integer counts in external JSON saturate at Int.max / UInt64.max without overflow traps
+        let extremeJSON = """
+        {
+          "coverage_status": "healthy",
+          "sample_size": 1,
+          "layers": [
+            {"layer_key": "role", "label_zh": "角色边界", "label_en": "Role Boundaries", "pre_fix_count": 9223372036854775807, "post_fix_count": 5},
+            {"layer_key": "invoke", "label_zh": "工具与参考调用", "label_en": "Tool & Reference Invocation", "pre_fix_count": 10, "post_fix_count": 9223372036854775807}
+          ],
+          "horizon_waste": {
+            "items": [
+              {"category_key": "context_carry", "label_zh": "a", "label_en": "a", "wasted_turns": 9223372036854775807, "wasted_tokens": 18446744073709551615},
+              {"category_key": "rework_verify", "label_zh": "b", "label_en": "b", "wasted_turns": 10, "wasted_tokens": 100}
+            ]
+          }
+        }
+        """
+        let extremeRetro = try JSONDecoder().decode(AgentRetroWorkbenchSummary.self, from: Data(extremeJSON.utf8))
+        #expect(extremeRetro.layers.first?.totalCount == Int.max)
+        #expect(extremeRetro.preFixTotal == Int.max)
+        #expect(extremeRetro.postFixTotal == Int.max)
+        #expect(extremeRetro.horizonWaste.wastedTurnsTotal == Int.max)
+        #expect(extremeRetro.horizonWaste.wastedTokensTotal == UInt64.max)
+
         // 4. SkillsRoiReport decodes skill_retro.agent_retro_watermarks and surfaces cured roadblocks
         let skillsWatermarkJSON = """
         {

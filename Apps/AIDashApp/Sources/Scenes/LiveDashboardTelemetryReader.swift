@@ -229,6 +229,18 @@ public struct AgentRoundDistributionSummary: Codable, Sendable, Equatable {
     }
 }
 
+private func saturatingAddInt(_ lhs: Int, _ rhs: Int) -> Int {
+    let a = max(0, lhs)
+    let b = max(0, rhs)
+    let (sum, overflow) = a.addingReportingOverflow(b)
+    return overflow ? Int.max : sum
+}
+
+private func saturatingAddUInt64(_ lhs: UInt64, _ rhs: UInt64) -> UInt64 {
+    let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+    return overflow ? UInt64.max : sum
+}
+
 public struct AgentRetroLayerRow: Codable, Sendable, Equatable, Identifiable {
     public let layerKey: String
     public let labelZh: String
@@ -277,9 +289,11 @@ public struct AgentRetroLayerRow: Codable, Sendable, Equatable, Identifiable {
         self.layerKey = layerKey
         self.labelZh = labelZh
         self.labelEn = labelEn
-        self.preFixCount = max(0, preFixCount)
-        self.postFixCount = max(0, postFixCount)
-        self.totalCount = max(max(0, preFixCount) + max(0, postFixCount), totalCount ?? 0)
+        let safePre = max(0, preFixCount)
+        let safePost = max(0, postFixCount)
+        self.preFixCount = safePre
+        self.postFixCount = safePost
+        self.totalCount = max(saturatingAddInt(safePre, safePost), max(0, totalCount ?? 0))
         self.affectedSessions = max(0, affectedSessions)
         self.topRoleKey = topRoleKey
         self.topRoleLabelZh = topRoleLabelZh
@@ -293,7 +307,7 @@ public struct AgentRetroLayerRow: Codable, Sendable, Equatable, Identifiable {
         let key = (try? container.decode(String.self, forKey: .layerKey)) ?? "role"
         let pre = max(0, (try? container.decode(Int.self, forKey: .preFixCount)) ?? 0)
         let post = max(0, (try? container.decode(Int.self, forKey: .postFixCount)) ?? 0)
-        let total = max(pre + post, (try? container.decode(Int.self, forKey: .totalCount)) ?? 0)
+        let total = max(saturatingAddInt(pre, post), max(0, (try? container.decode(Int.self, forKey: .totalCount)) ?? 0))
         self.layerKey = key
         self.labelZh = (try? container.decode(String.self, forKey: .labelZh)) ?? key
         self.labelEn = (try? container.decode(String.self, forKey: .labelEn)) ?? key
@@ -410,10 +424,10 @@ public struct AgentHorizonWasteSummary: Codable, Sendable, Equatable {
         self.wastedTurnsTotal = max(
             0,
             (try? container.decode(Int.self, forKey: .wastedTurnsTotal))
-                ?? decodedItems.reduce(0) { $0 + $1.wastedTurns }
+                ?? decodedItems.reduce(0) { saturatingAddInt($0, $1.wastedTurns) }
         )
         self.wastedTokensTotal = (try? container.decode(UInt64.self, forKey: .wastedTokensTotal))
-            ?? decodedItems.reduce(UInt64(0)) { $0 + $1.wastedTokens }
+            ?? decodedItems.reduce(UInt64(0)) { saturatingAddUInt64($0, $1.wastedTokens) }
     }
 }
 
@@ -522,12 +536,12 @@ public struct AgentRetroWorkbenchSummary: Codable, Sendable, Equatable {
         self.preFixTotal = max(
             0,
             (try? container.decode(Int.self, forKey: .preFixTotal))
-                ?? decodedLayers.reduce(0) { $0 + $1.preFixCount }
+                ?? decodedLayers.reduce(0) { saturatingAddInt($0, $1.preFixCount) }
         )
         self.postFixTotal = max(
             0,
             (try? container.decode(Int.self, forKey: .postFixTotal))
-                ?? decodedLayers.reduce(0) { $0 + $1.postFixCount }
+                ?? decodedLayers.reduce(0) { saturatingAddInt($0, $1.postFixCount) }
         )
         self.layers = decodedLayers
         self.horizonWaste = decodedHorizon
@@ -2960,10 +2974,10 @@ extension LiveDashboardTelemetryReader {
             )
         }
         let execRoles = roles.filter { ["writer", "reviewer", "designer"].contains($0.roleKey) }
-        let r1Sum = execRoles.reduce(0) { $0 + $1.r1Count }
-        let r2Sum = execRoles.reduce(0) { $0 + $1.r2Count }
-        let r3Sum = execRoles.reduce(0) { $0 + $1.r3PlusCount }
-        let evalTotal = r1Sum + r2Sum + r3Sum
+        let r1Sum = execRoles.reduce(0) { saturatingAddInt($0, $1.r1Count) }
+        let r2Sum = execRoles.reduce(0) { saturatingAddInt($0, $1.r2Count) }
+        let r3Sum = execRoles.reduce(0) { saturatingAddInt($0, $1.r3PlusCount) }
+        let evalTotal = saturatingAddInt(saturatingAddInt(r1Sum, r2Sum), r3Sum)
         let fallbackPass = summary.reviewedTasksCount > 0 ? max(0, 1.0 - summary.r1ReviewFailRate) : nil
         let roundSummary = AgentRoundDistributionSummary(
             r1Count: r1Sum,
@@ -2976,8 +2990,8 @@ extension LiveDashboardTelemetryReader {
             cacheHitRate: summary.cacheHitRate > 0 ? summary.cacheHitRate : nil
         )
         let sampleSize = max(
-            roles.reduce(0) { $0 + $1.runsCount },
-            max(dailyPoints.reduce(0) { $0 + $1.tasksCompleted }, fallbackRetro?.sampleSize ?? 0)
+            roles.reduce(0) { saturatingAddInt($0, $1.runsCount) },
+            max(dailyPoints.reduce(0) { saturatingAddInt($0, $1.tasksCompleted) }, fallbackRetro?.sampleSize ?? 0)
         )
         return AgentEfficiencyWorkbenchSnapshot(
             schemaVersion: 1,
@@ -3149,17 +3163,33 @@ extension LiveDashboardTelemetryReader {
                 (SELECT MAX(cst_day) FROM fact_agent_retro_finding WHERE cst_day IS NOT NULL),
                 date('now', '+8 hours')
             ) AS end_day
+        ),
+        windowed AS (
+            SELECT f.skill, f.skill_version, f.is_post_fix, f.occurrence_count, f.cst_day, f.rowid AS rid
+            FROM fact_agent_retro_finding AS f
+            CROSS JOIN anchor AS a
+            WHERE f.cst_day BETWEEN date(a.end_day, '-29 days') AND a.end_day
+        ),
+        latest_ver AS (
+            SELECT w.skill,
+                   w.skill_version,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY w.skill
+                       ORDER BY CASE WHEN w.skill_version IS NOT NULL AND w.skill_version != '' THEN 0 ELSE 1 END ASC,
+                                w.cst_day DESC, w.rid DESC
+                   ) AS rn
+            FROM windowed AS w
         )
-        SELECT f.skill, MAX(f.skill_version),
-               SUM(CASE WHEN f.is_post_fix = 0 THEN f.occurrence_count ELSE 0 END),
-               SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END),
-               MAX(f.cst_day)
-        FROM fact_agent_retro_finding AS f
-        CROSS JOIN anchor AS a
-        WHERE f.cst_day BETWEEN date(a.end_day, '-29 days') AND a.end_day
-        GROUP BY f.skill
-        ORDER BY SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END) DESC,
-                 SUM(f.occurrence_count) DESC, f.skill ASC;
+        SELECT w.skill,
+               lv.skill_version,
+               SUM(CASE WHEN w.is_post_fix = 0 THEN w.occurrence_count ELSE 0 END),
+               SUM(CASE WHEN w.is_post_fix = 1 THEN w.occurrence_count ELSE 0 END),
+               MAX(w.cst_day)
+        FROM windowed AS w
+        LEFT JOIN latest_ver AS lv ON lv.skill = w.skill AND lv.rn = 1
+        GROUP BY w.skill, lv.skill_version
+        ORDER BY SUM(CASE WHEN w.is_post_fix = 1 THEN w.occurrence_count ELSE 0 END) DESC,
+                 SUM(w.occurrence_count) DESC, w.skill ASC;
         """
         var watermarks: [AgentRetroSkillWatermark] = []
         var wmStmt: OpaquePointer?
@@ -3248,7 +3278,7 @@ extension LiveDashboardTelemetryReader {
                 let dStr = String(cString: dPtr)
                 if horizonAsOf == nil || dStr > (horizonAsOf ?? "") { horizonAsOf = dStr }
             }
-            grandTokens += row.toks
+            grandTokens = saturatingAddUInt64(grandTokens, row.toks)
             rawRows.append(row)
         }
         let items = rawRows.map { row -> AgentHorizonWasteItem in
@@ -3277,25 +3307,26 @@ extension LiveDashboardTelemetryReader {
             let row = byLayer[meta.key]
             let pre = row?.pre ?? 0
             let post = row?.post ?? 0
-            preTotal += pre
-            postTotal += post
+            preTotal = saturatingAddInt(preTotal, pre)
+            postTotal = saturatingAddInt(postTotal, post)
             if let asOf = row?.asOf { asOfCandidates.append(asOf) }
             let rKey = row?.role
             return AgentRetroLayerRow(
                 layerKey: meta.key, labelZh: meta.zh, labelEn: meta.en,
-                preFixCount: pre, postFixCount: post, totalCount: pre + post,
+                preFixCount: pre, postFixCount: post, totalCount: saturatingAddInt(pre, post),
                 affectedSessions: row?.sessions ?? 0, topRoleKey: rKey,
                 topRoleLabelZh: rKey.map(defaultRoleLabelZh), topRoleLabelEn: rKey.map(defaultRoleLabelEn),
                 topSkill: row?.skill, topSkillVersion: row?.ver
             )
         }
+        let hasObserved = preTotal > 0 || postTotal > 0 || !horizonItems.isEmpty
         let sample = distinctSessionSample > 0
             ? distinctSessionSample
-            : ((preTotal + postTotal > 0 || !horizonItems.isEmpty) ? max(1, horizonItems.count) : 0)
+            : (hasObserved ? max(1, horizonItems.count) : 0)
         let cov: String
         if sample == 0 && preTotal == 0 && postTotal == 0 && horizonItems.isEmpty {
             cov = "unknown"
-        } else if ((preTotal + postTotal > 0) && horizonItems.isEmpty) || (!horizonItems.isEmpty && (preTotal + postTotal == 0)) {
+        } else if ((preTotal > 0 || postTotal > 0) && horizonItems.isEmpty) || (!horizonItems.isEmpty && preTotal == 0 && postTotal == 0) {
             cov = "partial"
         } else {
             cov = "healthy"
@@ -3309,8 +3340,8 @@ extension LiveDashboardTelemetryReader {
             postFixTotal: postTotal,
             layers: layers,
             horizonWaste: AgentHorizonWasteSummary(
-                wastedTurnsTotal: horizonItems.reduce(0) { $0 + $1.wastedTurns },
-                wastedTokensTotal: horizonItems.reduce(UInt64(0)) { $0 + $1.wastedTokens },
+                wastedTurnsTotal: horizonItems.reduce(0) { saturatingAddInt($0, $1.wastedTurns) },
+                wastedTokensTotal: horizonItems.reduce(UInt64(0)) { saturatingAddUInt64($0, $1.wastedTokens) },
                 items: horizonItems
             ),
             skillWatermarks: watermarks
