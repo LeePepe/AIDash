@@ -1810,4 +1810,94 @@ def test_pseudo_skills_filtered_and_skill_retro_4layer_fallback(tmp_path, monkey
     ]
 
 
+@pytest.mark.unit
+def test_skills_roi_snapshot_normalizes_quality_judge_bool_judged_to_int(tmp_path):
+    import json
+    from pathlib import Path
+
+    from L5_apps.digest.quality_snapshot import build_judge_snapshot
+    from L5_apps.digest.skills_roi_snapshot import write_snapshot
+
+    fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
+    report_path = tmp_path / "report.json"
+    report_path.write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+    out_path = tmp_path / "skills-roi.json"
+
+    judge_section = build_judge_snapshot(
+        [
+            {
+                "invocation_id": "inv-1",
+                "skill": "team-lead",
+                "eligible": True,
+                "start_ts": "2026-11-20T10:00:00+08:00",
+            },
+            {
+                "invocation_id": "inv-2",
+                "skill": "team-lead",
+                "eligible": True,
+                "start_ts": "2026-11-20T10:30:00+08:00",
+            },
+            {
+                "invocation_id": "inv-3",
+                "skill": "aidash-metrics",
+                "eligible": True,
+                "start_ts": "2026-11-20T11:00:00+08:00",
+            },
+        ],
+        [
+            {
+                "invocation_id": "inv-1",
+                "sampled_at": "2026-11-20T12:00:00+08:00",
+                "status": "valid",
+                "abstained": False,
+                "overall_score": 4.5,
+                "judge_model": "judge-v1",
+            },
+            {
+                "invocation_id": "inv-2",
+                "sampled_at": "2026-11-20T12:05:00+08:00",
+                "status": "valid",
+                "abstained": False,
+                "overall_score": 4.0,
+                "judge_model": "judge-v1",
+            },
+        ],
+        now="2026-11-21T00:00:00+08:00",
+    )
+    assert isinstance(judge_section["skills"][0]["judged"], bool)
+
+    snap = write_snapshot(
+        out_path,
+        report_path,
+        query_runner=lambda name, params: (
+            [("2026-11-11", "copilot_cli_skill", "team-lead", 2, 1)],
+            ["day", "source", "skill", "n", "sessions"],
+        ),
+        icloud_sync_dir=tmp_path / "icloud",
+        quality_judge={
+            **judge_section,
+            "skills": [
+                *judge_section["skills"],
+                {"skill": "bool-without-valid", "judged": True},
+                {"skill": "bool-with-zero-valid", "judged": True, "valid_judgements": 0},
+                {"skill": "bool-false-only", "judged": False},
+            ],
+        },
+    )
+
+    assert isinstance(snap["quality_judge"]["skills"][0]["judged"], int)
+    assert not isinstance(snap["quality_judge"]["skills"][0]["judged"], bool)
+    persisted = json.loads(out_path.read_text(encoding="utf-8"))
+    for row in persisted["quality_judge"]["skills"]:
+        assert isinstance(row["judged"], int)
+        assert not isinstance(row["judged"], bool)
+    by_skill = {row["skill"]: row for row in persisted["quality_judge"]["skills"]}
+    assert by_skill["team-lead"]["judged"] == 2
+    assert by_skill["aidash-metrics"]["judged"] == 0
+    assert by_skill["bool-without-valid"]["judged"] == 1
+    assert by_skill["bool-with-zero-valid"]["judged"] == 1
+    assert by_skill["bool-false-only"]["judged"] == 0
+
+
+
 

@@ -1800,6 +1800,25 @@ def _validate_optional_metric_sections(report: dict[str, Any], problems: list[st
 
 
 
+def _normalize_quality_judge_payload(judge_payload: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(judge_payload)
+    skills = normalized.get("skills")
+    if isinstance(skills, list):
+        normalized_skills: list[dict[str, Any]] = []
+        for item in skills:
+            if not isinstance(item, Mapping):
+                continue
+            row = dict(item)
+            if isinstance(row.get("judged"), bool):
+                valid = row.get("valid_judgements")
+                if isinstance(valid, bool):
+                    valid = int(valid)
+                row["judged"] = int(valid or (1 if row.get("judged") else 0))
+            normalized_skills.append(row)
+        normalized["skills"] = normalized_skills
+    return normalized
+
+
 def build_snapshot(
     report: dict[str, Any],
     daily: list[dict[str, Any]],
@@ -1856,7 +1875,7 @@ def build_snapshot(
     if isinstance(behavior_rows, list):
         payload["quality_behavior"] = [dict(row) for row in behavior_rows if isinstance(row, Mapping)]
     if isinstance(judge_payload, Mapping):
-        payload["quality_judge"] = dict(judge_payload)
+        payload["quality_judge"] = _normalize_quality_judge_payload(judge_payload)
     if isinstance(report.get("skill_details"), list):
         payload["skill_details"] = report["skill_details"]
     elif isinstance((prior_snapshot or {}).get("skill_details"), list):
