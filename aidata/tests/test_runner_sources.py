@@ -38,7 +38,14 @@ def test_runner_sources_match_config() -> None:
     assert _runner_sources() == set(config.SOURCES)
 
 
-def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None, producer_exit_code=0):
+def _run_isolated_digest_chain(
+    tmp_path,
+    *,
+    producer_present=True,
+    report=None,
+    producer_exit_code=0,
+    agent_retro_present=False,
+):
     home, root, bin_dir = tmp_path / "home", tmp_path / "aidata", tmp_path / "bin"
     home.mkdir()
     root.mkdir()
@@ -51,14 +58,47 @@ def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None, 
         + f'exec {shlex.quote(sys.executable)} "$@"\n'
     )
     python.chmod(0o755)
-    (root / "cli.py").write_text("# Hermetic collect/normalize/merge/digest fixture\n")
+    (root / "cli.py").write_text(
+        'import json, os, sys\nfrom pathlib import Path\n'
+        'log = Path(os.environ["AIDASH_JOB_OUTPUT_DIR"]) / "stage-order.jsonl"\n'
+        'with log.open("a", encoding="utf-8") as fh:\n'
+        '    fh.write(json.dumps({"step": "cli", "argv": sys.argv[1:]}) + "\\n")\n'
+    )
     (root / "serve.py").write_text(
         'def run_query(name, params=None):\n'
-        '    assert name == "skills/daily"\n'
-        '    return ([("2026-11-11", "claude_attribution", "team-lead", 2, 1), '
+        '    if name == "skills/daily":\n'
+        '        return ([("2026-11-11", "claude_attribution", "team-lead", 2, 1), '
         '("2026-11-11", "claude_skill_tool", "team-lead", 2, 1)], '
         '["day", "source", "skill", "n", "sessions"])\n'
+        '    return ([], [])\n'
     )
+    if agent_retro_present:
+        (root / "adapters").mkdir(exist_ok=True)
+        (root / "adapters" / "__init__.py").write_text("")
+        (root / "adapters" / "agent_retro.py").write_text(
+            'import json, os\nfrom pathlib import Path\n'
+            'def collect(*, snapshot_path=None, **kwargs):\n'
+            '    snap = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))\n'
+            '    log = Path(os.environ["AIDASH_JOB_OUTPUT_DIR"]) / "stage-order.jsonl"\n'
+            '    with log.open("a", encoding="utf-8") as fh:\n'
+            '        fh.write(json.dumps({"step": "adapters.agent_retro.collect", "observations": len(snap.get("scan", {}).get("observations", []))}) + "\\n")\n'
+            '    return len(snap.get("scan", {}).get("observations", []))\n'
+        )
+    ar_script = root / "agent_retro_fixture.py"
+    if agent_retro_present:
+        ar_script.write_text(
+            'import json, os, sys\nfrom pathlib import Path\n'
+            'log = Path(os.environ["AIDASH_JOB_OUTPUT_DIR"]) / "stage-order.jsonl"\n'
+            'cmd = sys.argv[1]\n'
+            'with log.open("a", encoding="utf-8") as fh:\n'
+            '    fh.write(json.dumps({"step": f"agent_retro.{cmd}", "argv": sys.argv[1:]}) + "\\n")\n'
+            'if cmd == "collect":\n'
+            '    out_idx = sys.argv.index("--output") + 1\n'
+            '    Path(sys.argv[out_idx]).write_text(json.dumps({"schema": "agent-retro-collect/v1", "ok": True, "scan": {"version_watermark": {"current": "v8@abc1234", "target_skill_watermarks": {"team-lead": {"version": "v19@1a2b3c4"}}}, "observations": [{"metric": "R3_m1_inline_overwork", "layer": "role", "upstream_skill": "team-lead", "count": 1, "fix_bucket": "post_fix", "evidence": ["s1: ok"]}]}}), encoding="utf-8")\n'
+            '    print(json.dumps({"ok": True}))\n'
+            'elif cmd == "horizon":\n'
+            '    print(json.dumps({"schema": "agent-retro-horizon/v1", "ok": True, "observations": [{"metric": "HZN1_context_carry_tax", "layer": "horizon", "upstream_skill": "agent-retro", "count": 2, "fix_bucket": "post_fix", "evidence": ["s1: carry_byte_turns=80000"]}]}))\n'
+        )
     fixture = Path(__file__).parent / "fixtures" / "skills_roi_report.json"
     report_file = root / "producer-report.json"
     report_file.write_text(json.dumps(report) if report is not None else fixture.read_text())
@@ -82,14 +122,15 @@ def _run_isolated_digest_chain(tmp_path, *, producer_present=True, report=None, 
     state = root / "job" / "state.json"
     state.parent.mkdir()
     state.write_text(json.dumps({"jobID": "aidata-digest", "schedulerField": "preserve-me"}))
+    py_paths = [str(root), str(RUNNER.parent.parent)] if agent_retro_present else [str(RUNNER.parent.parent)]
     env = {
         **os.environ, "HOME": str(home), "AIDATA_HOME": str(root),
         "AIDASH_JOB_STATE_FILE": str(state), "AIDASH_JOB_OUTPUT_DIR": str(state.parent),
         "AIDASH_ICLOUD_SYNC_DIR": str(tmp_path / "icloud"),
-        "RETRO_ENGINE": str(engine), "DIGEST_VAULT_SCRIPT": str(vault),
+        "RETRO_ENGINE": str(engine), "AGENT_RETRO_SCRIPT": str(ar_script), "DIGEST_VAULT_SCRIPT": str(vault),
         "FIXTURE_REPORT": str(report_file), "FIXTURE_PRODUCER_EXIT": str(producer_exit_code),
         "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
-        "PYTHONPATH": str(RUNNER.parent.parent),
+        "PYTHONPATH": os.pathsep.join(py_paths),
     }
     proc = subprocess.run(["bash", str(RUNNER)], env=env, capture_output=True, text=True, timeout=30, check=False)
     return proc, json.loads((state.parent / "skills-roi.json").read_text()), json.loads(state.read_text()), state.parent
@@ -124,6 +165,38 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
     skill_roi_call = next(item for item in invocations if item["argv"][0] == "skill-roi")
     assert "--warehouse-db" in skill_roi_call["argv"]
     assert "--no-icloud-mirror" in skill_roi_call["argv"]
+
+
+def test_digest_runner_wires_agent_retro_collect_horizon_and_merge_before_snapshots(tmp_path):
+    runner_text = RUNNER.read_text(encoding="utf-8")
+    ar_pos = runner_text.find("adapters.agent_retro")
+    roi_snap_pos = runner_text.find("L5_apps.digest.skills_roi_snapshot")
+    eff_snap_pos = runner_text.find("L5_apps.digest.agent_efficiency_snapshot")
+    assert ar_pos != -1, "aidata_digest_run.sh must invoke adapters.agent_retro"
+    assert ar_pos < roi_snap_pos < eff_snap_pos
+
+    proc, _, state, job_dir = _run_isolated_digest_chain(tmp_path, agent_retro_present=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert state["stages"][2]["status"] == "ok"
+    assert not list(job_dir.glob(".agent-retro-*"))
+
+    steps = [
+        json.loads(line)
+        for line in (job_dir / "stage-order.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    ar_collect_idx = next(i for i, item in enumerate(steps) if item["step"] == "agent_retro.collect")
+    ar_horizon_idx = next(i for i, item in enumerate(steps) if item["step"] == "agent_retro.horizon")
+    adapter_idx = next(i for i, item in enumerate(steps) if item["step"] == "adapters.agent_retro.collect")
+    post_ar_merge_idx = next(
+        i for i, item in enumerate(steps)
+        if i > adapter_idx and item["step"] == "cli" and item["argv"] == ["merge"]
+    )
+    digest_idx = next(
+        i for i, item in enumerate(steps)
+        if item["step"] == "cli" and item["argv"] and item["argv"][0] == "digest"
+    )
+    assert ar_collect_idx < ar_horizon_idx < adapter_idx < post_ar_merge_idx < digest_idx
+    assert steps[adapter_idx]["observations"] == 2
 
 
 def _run_job_wrapper(

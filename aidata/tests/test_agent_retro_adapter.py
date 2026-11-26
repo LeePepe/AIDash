@@ -115,6 +115,12 @@ def test_collect_is_deduplicated_and_degrades_to_zero_when_absent(tmp_path, monk
                 "current": "v8@abc1234",
                 "target_skill_watermarks": {
                     "m2-dispatcher": {"current": "v5@def5678"},
+                    "team-lead": {
+                        "version": "v19@1a2b3c4",
+                        "commits": 19,
+                        "tree_sha": "1a2b3c4",
+                        "last_modified_epoch": 1795000000,
+                    },
                 },
             },
             "observations": [
@@ -159,3 +165,67 @@ def test_collect_is_deduplicated_and_degrades_to_zero_when_absent(tmp_path, monk
             "SELECT skill_version, is_post_fix FROM retro_finding WHERE skill = 'm2-dispatcher'"
         ).fetchone()
         assert m2_ver == ("v5@def5678", 1)
+        tl_ver = conn.execute(
+            "SELECT skill_version, is_post_fix FROM retro_finding WHERE skill = 'team-lead'"
+        ).fetchone()
+        assert tl_ver == ("v19@1a2b3c4", 1)
+
+
+def test_extract_snapshot_records_prefers_per_skill_version_key_over_global_current():
+    snapshot_payload = {
+        "schema": "agent-retro-collect/v1",
+        "ok": True,
+        "scan": {
+            "version_watermark": {
+                "current": "v8@abc1234",
+                "target_skill_watermarks": {
+                    "team-lead": {"version": "v21@9f8e7d6", "commits": 21, "tree_sha": "9f8e7d6"},
+                    "m2-dispatcher": {"current": "v5@def5678"},
+                    "code-review": {"skill_version": "v3@001122a"},
+                },
+            },
+            "observations": [
+                {
+                    "metric": "R3_m1_inline_overwork",
+                    "layer": "role",
+                    "upstream_skill": "team-lead",
+                    "count": 1,
+                    "fix_bucket": "post_fix",
+                    "evidence": ["sess-1: inline overwork"],
+                },
+                {
+                    "metric": "R2_m2_direct_code_edit",
+                    "layer": "role",
+                    "upstream_skill": "m2-dispatcher",
+                    "count": 1,
+                    "fix_bucket": "post_fix",
+                    "evidence": ["sess-2: direct edit"],
+                },
+                {
+                    "metric": "R5_reviewer_same_vendor",
+                    "layer": "role",
+                    "upstream_skill": "code-review",
+                    "count": 1,
+                    "fix_bucket": "post_fix",
+                    "evidence": ["sess-3: same vendor"],
+                },
+                {
+                    "metric": "I1_cold_start_greedy_drawer_read",
+                    "layer": "invoke",
+                    "upstream_skill": "agent-retro",
+                    "count": 1,
+                    "fix_bucket": "post_fix",
+                    "evidence": ["sess-4: fallback to global current"],
+                },
+            ],
+        },
+    }
+
+    records = agent_retro._extract_snapshot_records(snapshot_payload, fallback_ts="2026-11-26T00:00:00Z")
+    by_skill = {row["skill"]: row["skill_version"] for row in records if row["kind"] == "retro_finding"}
+    assert by_skill == {
+        "team-lead": "v21@9f8e7d6",
+        "m2-dispatcher": "v5@def5678",
+        "code-review": "v3@001122a",
+        "agent-retro": "v8@abc1234",
+    }

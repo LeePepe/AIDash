@@ -554,7 +554,11 @@ def _extract_snapshot_records(
             skill_norm = _normalize_skill(skill_raw)
             target_entry = target_watermarks.get(skill_norm) if isinstance(target_watermarks, Mapping) else None
             target_ver = (
-                _normalize_skill_version(target_entry.get("current") or target_entry.get("skill_version"))
+                _normalize_skill_version(
+                    target_entry.get("version")
+                    or target_entry.get("current")
+                    or target_entry.get("skill_version")
+                )
                 if isinstance(target_entry, Mapping)
                 else None
             )

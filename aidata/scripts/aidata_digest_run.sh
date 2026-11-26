@@ -132,6 +132,7 @@ STAGE3_START="$(date +%s)"
 STAGE3_RC=0
 STAGE3_STEP_TIMEOUT="${STAGE3_STEP_TIMEOUT:-180}"
 RETRO_ENGINE="${RETRO_ENGINE:-$HOME/Development/user-skills/skills/retro-loop/scripts/retro_story_engine.py}"
+AGENT_RETRO_SCRIPT="${AGENT_RETRO_SCRIPT:-$HOME/Development/user-skills/skills/agent-retro/scripts/agent_retro.py}"
 run_stage3_step() {
   if [ -n "$_TIMEOUT_BIN" ]; then
     "$_TIMEOUT_BIN" "$STAGE3_STEP_TIMEOUT" "$@"
@@ -143,8 +144,75 @@ mkdir -p "$JOB_OUTPUT_DIR"
 ICLOUD_STAGING_DIR="$JOB_OUTPUT_DIR/.icloud-staging"
 mkdir -p "$ICLOUD_STAGING_DIR"
 ROI_REPORT="$(mktemp "$JOB_OUTPUT_DIR/.skills-roi-report.XXXXXX")" || exit 1
+AR_SNAP="$(mktemp "$JOB_OUTPUT_DIR/.agent-retro-snapshot.XXXXXX")" || { rm -f "$ROI_REPORT"; exit 1; }
+AR_HORIZON="$(mktemp "$JOB_OUTPUT_DIR/.agent-retro-horizon.XXXXXX")" || { rm -f "$ROI_REPORT" "$AR_SNAP"; exit 1; }
+AR_WATERMARK="$(mktemp "$JOB_OUTPUT_DIR/.agent-retro-watermark.XXXXXX")" || { rm -f "$ROI_REPORT" "$AR_SNAP" "$AR_HORIZON"; exit 1; }
 ROI_RC=1
-trap 'rm -f "$ROI_REPORT"' EXIT
+trap 'rm -f "$ROI_REPORT" "$AR_SNAP" "$AR_HORIZON" "$AR_WATERMARK"' EXIT
+if [ -f "$AGENT_RETRO_SCRIPT" ]; then
+  AR_COLLECT_OK=0
+  run_stage3_step python3 "$AGENT_RETRO_SCRIPT" collect --days 7 --output "$AR_SNAP" --watermark-file "$AR_WATERMARK" --json >/dev/null \
+    && AR_COLLECT_OK=1 \
+    || { echo "[aidata-digest]   ! agent-retro collect warning"; STAGE3_RC=1; }
+  run_stage3_step python3 "$AGENT_RETRO_SCRIPT" horizon --days 7 --fast --json >"$AR_HORIZON" \
+    || { echo "[aidata-digest]   ! agent-retro horizon warning"; STAGE3_RC=1; }
+  if python3 - "$AR_SNAP" "$AR_HORIZON" "$AR_COLLECT_OK" <<'AR_MERGE_EOF'
+import json
+import sys
+from pathlib import Path
+
+snap_path, hz_path, collect_ok = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] == "1"
+snap = {}
+if collect_ok and snap_path.is_file() and snap_path.stat().st_size > 0:
+    try:
+        loaded = json.loads(snap_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            snap = loaded
+    except (OSError, ValueError):
+        snap = {}
+hz_obs = []
+if hz_path.is_file() and hz_path.stat().st_size > 0:
+    try:
+        hz_doc = json.loads(hz_path.read_text(encoding="utf-8"))
+        if isinstance(hz_doc, dict):
+            raw_obs = hz_doc.get("observations")
+            if not isinstance(raw_obs, list):
+                raw_obs = hz_doc.get("horizon")
+            if isinstance(raw_obs, list):
+                hz_obs = [row for row in raw_obs if isinstance(row, dict)]
+    except (OSError, ValueError):
+        hz_obs = []
+if not snap and not hz_obs:
+    raise SystemExit(1)
+scan = snap.get("scan")
+if not isinstance(scan, dict):
+    scan = {}
+    snap["scan"] = scan
+obs = scan.get("observations")
+if not isinstance(obs, list):
+    obs = []
+    scan["observations"] = obs
+existing_metrics = {str(row.get("metric") or "") for row in obs if isinstance(row, dict)}
+for row in hz_obs:
+    metric = str(row.get("metric") or "")
+    if metric and metric not in existing_metrics:
+        obs.append(row)
+        existing_metrics.add(metric)
+snap_path.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+AR_MERGE_EOF
+  then
+    if run_stage3_step python3 -c 'import adapters.agent_retro as ar, sys; ar.collect(snapshot_path=sys.argv[1])' "$AR_SNAP" >/dev/null; then
+      run_stage3_step python3 cli.py merge >/dev/null \
+        || { echo "[aidata-digest]   ! agent-retro warehouse merge warning"; STAGE3_RC=1; }
+    else
+      echo "[aidata-digest]   ! agent-retro adapter collect warning"
+      STAGE3_RC=1
+    fi
+  else
+    echo "[aidata-digest]   ! agent-retro combined snapshot empty"
+    STAGE3_RC=1
+  fi
+fi
 if [ -f "$RETRO_ENGINE" ]; then
   run_stage3_step env AIDASH_DISABLE_ICLOUD_MIRROR=1 AIDASH_ICLOUD_SYNC_DIR="$ICLOUD_STAGING_DIR" \
     python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
