@@ -26,6 +26,7 @@ JOB_STATE_FILE="${AIDASH_JOB_STATE_FILE:-$HOME/Library/Application Support/AIDas
 JOB_OUTPUT_DIR="${AIDASH_JOB_OUTPUT_DIR:-$(dirname "$JOB_STATE_FILE")}"
 SKILLS_ROI_FILE="$JOB_OUTPUT_DIR/skills-roi.json"
 AGENT_EFFICIENCY_FILE="$JOB_OUTPUT_DIR/agent-efficiency.json"
+WORK_STATUS_FILE="$JOB_OUTPUT_DIR/work-status.json"
 CHAIN_START_TS="$(date +%s)"
 
 _TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
@@ -49,7 +50,7 @@ sync_job_artifacts() {
   local target_dir="$sync_root/jobs/$job_id"
   run_bounded mkdir -p "$target_dir" || return 1
   local name source tmp
-  for name in state.json actions.jsonl skills-roi.json agent-efficiency.json; do
+  for name in state.json actions.jsonl skills-roi.json agent-efficiency.json work-status.json; do
     source="$job_output_dir/$name"
     [ "$name" = "state.json" ] && source="$state_file"
     [ -f "$source" ] || continue
@@ -213,6 +214,16 @@ AR_MERGE_EOF
     STAGE3_RC=1
   fi
 fi
+SW_NEED_MERGE=0
+if run_stage3_step python3 -c 'import adapters.session_work as sw; sw.collect()' >/dev/null; then
+  SW_NEED_MERGE=1
+else
+  echo "[aidata-digest]   ! session-work adapter collect warning"
+fi
+if [ "$SW_NEED_MERGE" -eq 1 ]; then
+  run_stage3_step python3 cli.py merge >/dev/null \
+    || { echo "[aidata-digest]   ! session-work warehouse merge warning"; STAGE3_RC=1; }
+fi
 if [ -f "$RETRO_ENGINE" ]; then
   run_stage3_step env AIDASH_DISABLE_ICLOUD_MIRROR=1 AIDASH_ICLOUD_SYNC_DIR="$ICLOUD_STAGING_DIR" \
     python3 "$RETRO_ENGINE" agent-efficiency --auto-propose >/dev/null \
@@ -234,6 +245,8 @@ if ! run_stage3_step python3 -m L5_apps.digest.skills_roi_snapshot --report "$RO
 fi
 run_stage3_step python3 -m L5_apps.digest.agent_efficiency_snapshot --output "$AGENT_EFFICIENCY_FILE" \
   || echo "[aidata-digest]   ! agent-efficiency snapshot warning"
+run_stage3_step python3 -m L5_apps.digest.work_status_snapshot --output "$WORK_STATUS_FILE" \
+  || echo "[aidata-digest]   ! work-status snapshot warning"
 STAGE3_DUR=$(( $(date +%s) - STAGE3_START ))
 STAGE3_STATUS=$([ "$STAGE3_RC" -eq 0 ] && echo "ok" || echo "warning")
 
