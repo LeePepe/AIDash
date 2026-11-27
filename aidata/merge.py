@@ -418,6 +418,109 @@ def _merge_agent_retro_facts(conn: sqlite3.Connection) -> dict[str, int]:
     return counts
 
 
+_VALID_SESSION_WORK_ROLES = frozenset({
+    "m3", "m2", "m1", "designer", "writer", "reviewer", "explorer", "pr_monitor"
+})
+
+
+def _merge_session_work_facts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Merge optional clean/session_work.db into warehouse facts without recollecting."""
+    if conn.in_transaction:
+        conn.commit()
+    counts = {"fact_session_work_summary": 0}
+    sw_db = clean_path("session_work")
+    if not sw_db.exists():
+        return counts
+
+    conn.execute("ATTACH DATABASE ? AS session_work", (str(sw_db),))
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM session_work.sqlite_master WHERE type='table'"
+            )
+        }
+        if "session_work" in tables:
+            columns = [row[1] for row in conn.execute("PRAGMA session_work.table_info(session_work)")]
+            rows = [dict(zip(columns, values)) for values in conn.execute("SELECT * FROM session_work.session_work")]
+            target_columns = [
+                "session_uid",
+                "source",
+                "session_id_short",
+                "goal_id",
+                "repo_name",
+                "branch_name",
+                "role_key",
+                "model_id",
+                "summary_label",
+                "started_at",
+                "ended_at",
+                "duration_sec",
+                "turn_count",
+                "total_tokens",
+                "skills_json",
+                "search_read_calls",
+                "code_edit_calls",
+                "verify_script_calls",
+                "spin_rework_calls",
+                "files_changed_count",
+                "commits_count",
+                "pr_number",
+                "slow_or_failed_scripts_json",
+            ]
+            valid_rows = []
+            for row in rows:
+                uid = str(row.get("session_uid") or "").strip()
+                started = str(row["started_at"]).strip() if row.get("started_at") not in (None, "") else None
+                ended = str(row["ended_at"]).strip() if row.get("ended_at") not in (None, "") else None
+                if not uid or (not started and not ended):
+                    continue
+                role = str(row.get("role_key") or "writer").strip().lower()
+                if role not in _VALID_SESSION_WORK_ROLES:
+                    role = "writer"
+                pr_raw = row.get("pr_number")
+                pr_num = int(pr_raw) if isinstance(pr_raw, (int, float)) and not isinstance(pr_raw, bool) and int(pr_raw) > 0 else None
+                valid_rows.append((
+                    uid,
+                    str(row.get("source") or "copilot_cli"),
+                    str(row.get("session_id_short") or "00000000")[:8],
+                    str(row["goal_id"]) if row.get("goal_id") not in (None, "") else None,
+                    str(row["repo_name"]) if row.get("repo_name") not in (None, "") else None,
+                    str(row["branch_name"]) if row.get("branch_name") not in (None, "") else None,
+                    role,
+                    str(row["model_id"]) if row.get("model_id") not in (None, "") else None,
+                    str(row["summary_label"])[:80] if row.get("summary_label") not in (None, "") else None,
+                    started,
+                    ended,
+                    max(0.0, float(row.get("duration_sec") or 0.0)),
+                    max(0, int(row.get("turn_count") or 0)),
+                    max(0, int(row.get("total_tokens") or 0)),
+                    str(row.get("skills_json") or "[]"),
+                    max(0, int(row.get("search_read_calls") or 0)),
+                    max(0, int(row.get("code_edit_calls") or 0)),
+                    max(0, int(row.get("verify_script_calls") or 0)),
+                    max(0, int(row.get("spin_rework_calls") or 0)),
+                    max(0, int(row.get("files_changed_count") or 0)),
+                    max(0, int(row.get("commits_count") or 0)),
+                    pr_num,
+                    str(row.get("slow_or_failed_scripts_json") or "[]"),
+                ))
+            if valid_rows:
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO fact_session_work_summary ({', '.join(target_columns)}) "
+                    f"VALUES ({', '.join('?' for _ in target_columns)})",
+                    valid_rows,
+                )
+            counts["fact_session_work_summary"] = conn.execute(
+                "SELECT count(*) FROM fact_session_work_summary"
+            ).fetchone()[0]
+    finally:
+        if conn.in_transaction:
+            conn.commit()
+        conn.execute("DETACH DATABASE session_work")
+    return counts
+
+
 def run_merge() -> dict[str, int]:
     WAREHOUSE_DB.parent.mkdir(parents=True, exist_ok=True)
     # Fresh rebuild — derived artifact.
@@ -438,6 +541,7 @@ def run_merge() -> dict[str, int]:
         ).fetchone()[0]
         counts.update(_merge_quality_facts(conn))
         counts.update(_merge_agent_retro_facts(conn))
+        counts.update(_merge_session_work_facts(conn))
 
         # --- P0 GTT dimensions/facts ---
         if _attach(conn, "gtt_ledger", "gl"):

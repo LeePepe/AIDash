@@ -72,9 +72,17 @@ def _run_isolated_digest_chain(
         '["day", "source", "skill", "n", "sessions"])\n'
         '    return ([], [])\n'
     )
+    (root / "adapters").mkdir(exist_ok=True)
+    (root / "adapters" / "__init__.py").write_text("")
+    (root / "adapters" / "session_work.py").write_text(
+        'import json, os\nfrom pathlib import Path\n'
+        'def collect(**kwargs):\n'
+        '    log = Path(os.environ["AIDASH_JOB_OUTPUT_DIR"]) / "stage-order.jsonl"\n'
+        '    with log.open("a", encoding="utf-8") as fh:\n'
+        '        fh.write(json.dumps({"step": "adapters.session_work.collect"}) + "\\n")\n'
+        '    return 1\n'
+    )
     if agent_retro_present:
-        (root / "adapters").mkdir(exist_ok=True)
-        (root / "adapters" / "__init__.py").write_text("")
         (root / "adapters" / "agent_retro.py").write_text(
             'import json, os\nfrom pathlib import Path\n'
             'def collect(*, snapshot_path=None, **kwargs):\n'
@@ -122,7 +130,7 @@ def _run_isolated_digest_chain(
     state = root / "job" / "state.json"
     state.parent.mkdir()
     state.write_text(json.dumps({"jobID": "aidata-digest", "schedulerField": "preserve-me"}))
-    py_paths = [str(root), str(RUNNER.parent.parent)] if agent_retro_present else [str(RUNNER.parent.parent)]
+    py_paths = [str(root), str(RUNNER.parent.parent)]
     env = {
         **os.environ, "HOME": str(home), "AIDATA_HOME": str(root),
         "AIDASH_JOB_STATE_FILE": str(state), "AIDASH_JOB_OUTPUT_DIR": str(state.parent),
@@ -154,6 +162,9 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
     assert json.loads((cloud_job_dir / "state.json").read_text()) == state
     assert json.loads((cloud_job_dir / "skills-roi.json").read_text()) == snapshot
     assert (cloud_job_dir / "agent-efficiency.json").is_file()
+    assert (job_dir / "work-status.json").is_file()
+    assert (cloud_job_dir / "work-status.json").is_file()
+    assert json.loads((cloud_job_dir / "work-status.json").read_text())["contract"] == "aidash-work-status/v1"
     assert not list(job_dir.glob(".skills-roi-report.*"))
     invocations = [
         json.loads(line)
@@ -170,10 +181,14 @@ def test_digest_runner_exports_real_full_report_and_disjoint_daily_grains(tmp_pa
 def test_digest_runner_wires_agent_retro_collect_horizon_and_merge_before_snapshots(tmp_path):
     runner_text = RUNNER.read_text(encoding="utf-8")
     ar_pos = runner_text.find("adapters.agent_retro")
+    sw_pos = runner_text.find("adapters.session_work")
     roi_snap_pos = runner_text.find("L5_apps.digest.skills_roi_snapshot")
     eff_snap_pos = runner_text.find("L5_apps.digest.agent_efficiency_snapshot")
+    ws_snap_pos = runner_text.find("L5_apps.digest.work_status_snapshot")
     assert ar_pos != -1, "aidata_digest_run.sh must invoke adapters.agent_retro"
-    assert ar_pos < roi_snap_pos < eff_snap_pos
+    assert sw_pos != -1, "aidata_digest_run.sh must invoke adapters.session_work"
+    assert ws_snap_pos != -1, "aidata_digest_run.sh must invoke L5_apps.digest.work_status_snapshot"
+    assert ar_pos < sw_pos < roi_snap_pos < eff_snap_pos < ws_snap_pos
 
     proc, _, state, job_dir = _run_isolated_digest_chain(tmp_path, agent_retro_present=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -187,15 +202,16 @@ def test_digest_runner_wires_agent_retro_collect_horizon_and_merge_before_snapsh
     ar_collect_idx = next(i for i, item in enumerate(steps) if item["step"] == "agent_retro.collect")
     ar_horizon_idx = next(i for i, item in enumerate(steps) if item["step"] == "agent_retro.horizon")
     adapter_idx = next(i for i, item in enumerate(steps) if item["step"] == "adapters.agent_retro.collect")
-    post_ar_merge_idx = next(
+    sw_adapter_idx = next(i for i, item in enumerate(steps) if item["step"] == "adapters.session_work.collect")
+    post_sw_merge_idx = next(
         i for i, item in enumerate(steps)
-        if i > adapter_idx and item["step"] == "cli" and item["argv"] == ["merge"]
+        if i > sw_adapter_idx and item["step"] == "cli" and item["argv"] == ["merge"]
     )
     digest_idx = next(
         i for i, item in enumerate(steps)
         if item["step"] == "cli" and item["argv"] and item["argv"][0] == "digest"
     )
-    assert ar_collect_idx < ar_horizon_idx < adapter_idx < post_ar_merge_idx < digest_idx
+    assert ar_collect_idx < ar_horizon_idx < adapter_idx < sw_adapter_idx < post_sw_merge_idx < digest_idx
     assert steps[adapter_idx]["observations"] == 2
 
 
