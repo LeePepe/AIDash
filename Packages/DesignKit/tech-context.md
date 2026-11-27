@@ -14,7 +14,7 @@ roles:                              # 层内轴:类角色 → 目录(角色顺�
   Types: [Color]                    # ColorSystem + Theme:seed→token,纯值,不依赖组件
   UI:    [Components]               # Card/Metric/Sparkline/RingGauge/StatusPill:消费 Color
 test: swift test --package-path Packages/DesignKit
-owns: [Seed, Neutral, PrimaryPalette, Neutrals, Semantic, Classification, TextRole, Theme, makePrimaryPalette, chartPalette, Card, CardInner, Metric, Sparkline, RingGauge, StatusPill, SectionHeader, PillTone]
+owns: [Seed, Neutral, PrimaryPalette, Neutrals, Semantic, Classification, TextRole, Theme, dynamicSystemColor, makePrimaryPalette, makeDynamicPrimaryPalette, chartPalette, dynamicChartPalette, Card, CardInner, Metric, Sparkline, RingGauge, StatusPill, SectionHeader, PillTone]
 ---
 
 # DesignKit Tech Context
@@ -81,9 +81,10 @@ DesignKit 管视觉。AIDashUI 同时依赖二者。
   (系统色 `.blue/.green` 或 hex 都不行),仅保留文本语义角色 `.primary/.secondary/.tertiary`。
 - **AIDashUI 拥有卡片域几何/排版语义**:`AIDashTypography`/`AIDashSize`/`AIDashChrome`——
   绑定 constitution 的 type/size/style 三正交维度,是 briefing 专用,留在 AIDashUI。
-- **运行时注入**:`AIDashApp` 在 `BriefingWindowScene` 用
-  `.designTheme(seed: .appleBlue, neutral: .slate)` 注入 `Theme`;视图据此解析所有颜色,
-  自动随 colorScheme 出深/浅色变体。
+- **运行时动态系统外观**:`ThemeKey.defaultValue` 默认构造 OS 动态 `Theme(seed: .appleBlue, neutral: .slate)`,
+  底层通过 `NSColor(name: nil) { appearance in ... }` / `UIColor { traits in ... }` 在绘制期直接读取系统外观
+  (`NSAppearance` `.aqua`/`.darkAqua` 与 `UITraitCollection.userInterfaceStyle`),无需 `.designTheme(...)`
+  修饰符或手动注入 `isDark` 环境值。`Theme(seed:neutral:isDark:)` 仅保留供确定性单元测试校验色值数学。
 - **宪法依据**:constitution 1.6.0 §Design System & Tokens + Quality Bar §I P1.4——
   颜色 MUST 来自 package token 源,视图 MUST NOT 内联颜色。分类 tint 用固定 light/dark
   hex 对(非 seed 派生),保证 6 色恒可区分且保留深色模式。

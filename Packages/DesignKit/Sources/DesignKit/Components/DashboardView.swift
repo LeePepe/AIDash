@@ -86,6 +86,5 @@ public struct DashboardView: View {
 
 #Preview("Dashboard") {
     DashboardView()
-        .designTheme(seed: .appleBlue, neutral: .slate)
         .frame(width: 720, height: 640)
 }

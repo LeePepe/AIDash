@@ -1,47 +1,75 @@
 import SwiftUI
 #if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
 #endif
 
 // ============================================================================
-//  Theme — a resolved token set for the current (seed, neutral, colorScheme).
-//  Inject via .environment(\.theme, …); read with @Environment(\.theme).
-//  This is the SwiftUI equivalent of the web CSS-variable set.
+//  Theme — an OS-appearance-adaptive token set for (seed, neutral).
+//  Default `Theme()` (`ThemeKey.defaultValue`) resolves every token at draw
+//  time from macOS `NSAppearance` / iOS `UITraitCollection` with zero manual
+//  `.designTheme(...)` or `isDark` environment plumbing.
 // ============================================================================
 
 public struct Theme: Sendable {
     public let seed: Seed
     public let neutral: Neutral
-    public let isDark: Bool
+    private let forcedDark: Bool?
 
     public let primary: PrimaryPalette
     public let neutrals: Neutrals
     public let charts: [Color]
 
-    public var success: Color { Semantic.success(isDark: isDark) }
-    public var warning: Color { Semantic.warning(isDark: isDark) }
-    public var danger: Color { Semantic.danger(isDark: isDark) }
+    public var success: Color {
+        forcedDark.map { Semantic.success(isDark: $0) } ?? Semantic.success
+    }
+    public var warning: Color {
+        forcedDark.map { Semantic.warning(isDark: $0) } ?? Semantic.warning
+    }
+    public var danger: Color {
+        forcedDark.map { Semantic.danger(isDark: $0) } ?? Semantic.danger
+    }
 
     /// The three semantics as READABLE TEXT on a tint of themselves (status
     /// pills). The plain `success`/`warning`/`danger` above are FILL colors
     /// and do not meet small-text contrast in that role — see `Semantic`.
-    public var successOnSubtle: Color { Semantic.successOnSubtle(isDark: isDark) }
-    public var warningOnSubtle: Color { Semantic.warningOnSubtle(isDark: isDark) }
-    public var dangerOnSubtle: Color { Semantic.dangerOnSubtle(isDark: isDark) }
+    public var successOnSubtle: Color {
+        forcedDark.map { Semantic.successOnSubtle(isDark: $0) } ?? Semantic.successOnSubtle
+    }
+    public var warningOnSubtle: Color {
+        forcedDark.map { Semantic.warningOnSubtle(isDark: $0) } ?? Semantic.warningOnSubtle
+    }
+    public var dangerOnSubtle: Color {
+        forcedDark.map { Semantic.dangerOnSubtle(isDark: $0) } ?? Semantic.dangerOnSubtle
+    }
 
     /// Text color for a semantic role — `body` is accessible by construction.
     /// Prefer this over reaching for `neutrals.text1/2/3` directly.
     public func text(_ role: TextRole) -> Color { neutrals.text(role) }
 
-    /// Per-category icon-badge tint, resolved for the current color scheme.
+    /// Per-category icon-badge tint, resolved dynamically for OS appearance
+    /// (or deterministically when constructed via the unit-test `isDark:` overload).
     public func classificationTint(_ kind: Classification) -> Color {
-        kind.tint(isDark: isDark)
+        forcedDark.map { kind.tint(isDark: $0) } ?? kind.dynamicTint
     }
 
-    public init(seed: Seed = .appleBlue, neutral: Neutral = .slate, isDark: Bool = false) {
+    /// OS-dynamic theme (default for production views and `ThemeKey.defaultValue`).
+    /// All palettes resolve light vs dark dynamically at draw time via `NSAppearance` / `UITraitCollection`.
+    public init(seed: Seed = .appleBlue, neutral: Neutral = .slate) {
         self.seed = seed
         self.neutral = neutral
-        self.isDark = isDark
+        self.forcedDark = nil
+        self.primary = makeDynamicPrimaryPalette(seed: seed.color, darkAnchor: seed.darkAnchor)
+        self.neutrals = neutral.dynamicPalette
+        self.charts = dynamicChartPalette(seed: seed.color)
+    }
+
+    /// Deterministic unit-test initializer pinning light or dark token math.
+    public init(seed: Seed = .appleBlue, neutral: Neutral = .slate, isDark: Bool) {
+        self.seed = seed
+        self.neutral = neutral
+        self.forcedDark = isDark
         self.primary = makePrimaryPalette(seed: seed.color, isDark: isDark, darkAnchor: seed.darkAnchor)
         self.neutrals = neutral.palette(isDark: isDark)
         self.charts = chartPalette(seed: seed.color, isDark: isDark)
@@ -102,26 +130,5 @@ public extension EnvironmentValues {
     var theme: Theme {
         get { self[ThemeKey.self] }
         set { self[ThemeKey.self] = newValue }
-    }
-}
-
-public extension View {
-    /// Resolve the theme from a (seed, neutral) + the current colorScheme.
-    func designTheme(seed: Seed = .appleBlue, neutral: Neutral = .slate) -> some View {
-        modifier(ThemeResolver(seed: seed, neutral: neutral))
-    }
-}
-
-private struct ThemeResolver: ViewModifier {
-    let seed: Seed
-    let neutral: Neutral
-    @Environment(\.colorScheme) private var scheme
-
-    func body(content: Content) -> some View {
-        let theme = Theme(seed: seed, neutral: neutral, isDark: scheme == .dark)
-        content
-            .environment(\.theme, theme)
-            .background(theme.neutrals.bg)
-            .foregroundStyle(theme.neutrals.text1)
     }
 }

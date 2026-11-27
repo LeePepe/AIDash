@@ -269,4 +269,40 @@ struct ThemeTests {
         let unique = Set(first4.map { String(describing: $0) })
         #expect(unique.count == 4, "the first four categorical slots must be visually distinct")
     }
+
+    #if canImport(AppKit)
+    @Test("default Theme() resolves dynamically from NSAppearance (.aqua vs .darkAqua) with zero manual isDark")
+    func defaultThemeFollowsOSAppearanceAtDrawTime() throws {
+        let aqua = try #require(NSAppearance(named: .aqua))
+        let darkAqua = try #require(NSAppearance(named: .darkAqua))
+
+        func resolvedHexInAppearance(_ color: Color, appearance: NSAppearance) -> String {
+            var hex = "#000000"
+            appearance.performAsCurrentDrawingAppearance {
+                let ns = NSColor(color).usingColorSpace(.sRGB) ?? .black
+                let r = Int((ns.redComponent * 255).rounded())
+                let g = Int((ns.greenComponent * 255).rounded())
+                let b = Int((ns.blueComponent * 255).rounded())
+                hex = String(format: "#%02X%02X%02X", r, g, b)
+            }
+            return hex
+        }
+
+        let defaultTheme = Theme()
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.bg, appearance: aqua) == "#EDEEF2")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.bg, appearance: darkAqua) == "#0E0F12")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.card, appearance: aqua) == "#FFFFFF")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.card, appearance: darkAqua) == "#1A1C20")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.inner, appearance: aqua) == "#F4F5F8")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.inner, appearance: darkAqua) == "#242629")
+        #expect(resolvedHexInAppearance(defaultTheme.success, appearance: aqua) == "#34C759")
+        #expect(resolvedHexInAppearance(defaultTheme.success, appearance: darkAqua) == "#30D158")
+        #expect(resolvedHexInAppearance(defaultTheme.classificationTint(.metric), appearance: aqua) == "#007AFF")
+        #expect(resolvedHexInAppearance(defaultTheme.classificationTint(.metric), appearance: darkAqua) == "#0A84FF")
+
+        let limeDynamic = Theme(seed: .lime, neutral: .slate)
+        #expect(resolvedHexInAppearance(limeDynamic.primary.primary, appearance: aqua) == "#5A8A00")
+        #expect(resolvedHexInAppearance(limeDynamic.primary.primary, appearance: darkAqua) == "#C6F04A")
+    }
+    #endif
 }
