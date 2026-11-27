@@ -57,7 +57,7 @@ fabricated as zero. `SkillsRoiDiagnosticsCardView` renders a proposal-driven
 4-column macro vitals band, a 4-object segmented stage with 2-column Bento
 cards, and a single-skill 4-in-1 health sheet opened on demand. Repeated
 cards/rows combine their child accessibility labels so metadata remains
-announced, while all semantic colors come from the injected DesignKit theme.
+announced, while all semantic colors come from `DesignKit`'s OS-dynamic `Theme.system`.
 It never renders diagnostic workbenches, source previews, commands, session
 samples, or root-cause panels. Responsive geometry is proposal-driven and
 Decodable report models remain backward compatible with existing fixtures.

@@ -116,7 +116,7 @@ public struct AIDashTwoTabPreviewHostBoard: View {
     @State private var expandAll = false
     @State private var speed: PreviewSpeedMultiplier = .normal
     @State private var receiptWriter: PreviewSelectionReceiptWriter
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     private let data: AIDashPreviewSampleData
 
     public init(data: AIDashPreviewSampleData? = nil, receiptPath: URL? = nil) {

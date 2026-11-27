@@ -1349,7 +1349,7 @@ struct TK3SnapshotRenderTests {
             .frame(width: width, alignment: .topLeading)
             .padding(20)
             .fixedSize(horizontal: false, vertical: true)
-            .background(Theme().neutrals.bg)
+            .background(Theme.system.neutrals.bg)
             .environment(\.colorScheme, scheme)
             .environment(\.dashboardGeometryRecorder, recorder)
             .coordinateSpace(name: "tk3-geometry")
@@ -1539,7 +1539,7 @@ struct TK3SnapshotRenderTests {
                 let root = AgentRetroTrajectoryPanelsView(retro: sample)
                     .frame(width: 920, alignment: .topLeading)
                     .padding(16)
-                    .background(Theme().neutrals.card)
+                    .background(Theme.system.neutrals.card)
                     .environment(\.colorScheme, scheme)
                 var renderedImage: NSImage?
                 appearance.performAsCurrentDrawingAppearance {

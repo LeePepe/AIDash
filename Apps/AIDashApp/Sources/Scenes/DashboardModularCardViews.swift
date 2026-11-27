@@ -14,7 +14,7 @@ public struct SolidModularCardContainer<HeaderAccessory: View, Content: View>: V
     private let content: Content
 
     @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(
         title: String, subtitle: String? = nil, symbolName: String,
@@ -70,7 +70,7 @@ public enum DashboardSemanticColorPalette {
 
 public struct SystemTelemetryStripView: View {
     public let snapshot: MenuBarSystemSnapshot
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(snapshot: MenuBarSystemSnapshot) {
         self.snapshot = snapshot
@@ -167,7 +167,7 @@ public struct SystemTelemetryStripView: View {
 public struct KPISummaryCardView: View {
     public let metrics: [KPIMetricItem]
     public var onSelectMetric: ((String) -> Void)?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(metrics: [KPIMetricItem], onSelectMetric: ((String) -> Void)? = nil) {
         self.metrics = metrics
@@ -315,7 +315,7 @@ private struct TrendChartInteractiveCanvas: View {
     let selectedCategory: String?
     let timeGranularity: DashboardChartTimeGranularity
     @State private var hoveredBucketLabel: String?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     var body: some View {
         let hoverSummary = hoveredBucketLabel.flatMap {
@@ -449,7 +449,7 @@ public struct CLICostQuotaCardView: View {
     public let periodTotalUSD: Double
     public var selectedCategory: String?
     public var onSelectCategory: ((String) -> Void)?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(
         entries: [CLICostQuotaEntry], todayTotalUSD: Double, periodTotalUSD: Double,
@@ -690,7 +690,7 @@ public struct AgentEfficiencyChartsCardView: View {
     public let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     @State private var workloadMetric: AgentEfficiencyWorkloadMetric = .runs
     @Environment(\.locale) private var locale
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?) {
         self.summary = summary

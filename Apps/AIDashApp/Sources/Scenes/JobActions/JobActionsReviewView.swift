@@ -7,7 +7,7 @@ import AIDashCore
 /// Read-only review of the authoritative action and the staged proposal, outside Briefing.
 @MainActor
 struct JobActionsReviewView: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     let review: JobActionsReviewModel
     let confirm: () -> Void
     let cancel: () -> Void

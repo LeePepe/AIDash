@@ -103,7 +103,7 @@ public struct ActionItemsCardView: View {
     @State private var expandedBugBlockers = false
     @State private var collapsedDomains: Set<DashboardActionDomain> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(
         store: DashboardWorkspaceStore,
@@ -1431,7 +1431,7 @@ public struct ActionItemsCardView: View {
 
 public struct RankingTableCardView: View {
     @Bindable public var store: DashboardWorkspaceStore
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(store: DashboardWorkspaceStore) {
         self.store = store
@@ -1523,7 +1523,7 @@ public struct AIDashMacWorkspaceView: View {
     @State private var showPreviewHostGallery = false
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(
         store: DashboardWorkspaceStore? = nil,

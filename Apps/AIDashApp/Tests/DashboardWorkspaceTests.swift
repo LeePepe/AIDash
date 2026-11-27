@@ -480,13 +480,13 @@ struct DashboardWorkspaceTests {
                 let platters = HStack(spacing: 12) {
                     view.unifiedDateNavigationToolbarCluster
                         .padding(12)
-                        .background(Theme().neutrals.card.opacity(0.7), in: Capsule())
+                        .background(Theme.system.neutrals.card.opacity(0.7), in: Capsule())
                     view.rightToolbarCluster(snapshot: state.snapshot)
                         .padding(12)
-                        .background(Theme().neutrals.card.opacity(0.7), in: Capsule())
+                        .background(Theme.system.neutrals.card.opacity(0.7), in: Capsule())
                 }
                 .padding(12)
-                .background(Theme().neutrals.bg)
+                .background(Theme.system.neutrals.bg)
                 .environment(\.colorScheme, scheme)
                 for (kind, renderable) in [("standalone", AnyView(standalone)), ("two-platter-simulation", AnyView(platters))] {
                     let bitmap = try toolbarHeaderBitmap(for: renderable, scheme: scheme)
@@ -1114,7 +1114,7 @@ struct DashboardWorkspaceTests {
                     let renderer = ImageRenderer(content: view
                         .frame(width: 760, alignment: .topLeading)
                         .padding(16)
-                        .background(Theme().neutrals.bg)
+                        .background(Theme.system.neutrals.bg)
                         .environment(\.colorScheme, scheme))
                     renderer.scale = 2
                     renderedImage = renderer.nsImage
@@ -1620,7 +1620,7 @@ struct DashboardWorkspaceTests {
                 let card = AgentEfficiencyChartsCardView(summary: stateSummary)
                     .frame(width: 1080)
                     .padding(16)
-                    .background(Theme().neutrals.bg)
+                    .background(Theme.system.neutrals.bg)
                     .environment(\.colorScheme, scheme)
                 let bmp = try toolbarHeaderBitmap(for: card, scheme: scheme)
                 let png = try #require(bmp.representation(using: .png, properties: [:]))
@@ -2160,7 +2160,7 @@ struct DashboardWorkspaceTests {
         )
         .frame(width: 1120)
         .padding(16)
-        .background(Theme().neutrals.bg)
+        .background(Theme.system.neutrals.bg)
         .environment(\.colorScheme, .dark)
         .environment(\.dashboardGeometryRecorder, recorder)
         .coordinateSpace(name: "tk3-geometry")
@@ -2239,7 +2239,7 @@ struct DashboardWorkspaceTests {
                     )
                     .frame(width: 1120)
                     .padding(16)
-                    .background(Theme().neutrals.bg)
+                    .background(Theme.system.neutrals.bg)
                     .environment(\.colorScheme, scheme)
                     let stateBmp = try toolbarHeaderBitmap(for: v, scheme: scheme)
                     if let png = stateBmp.representation(using: .png, properties: [:]) {
@@ -2722,7 +2722,7 @@ struct DashboardWorkspaceTests {
                 let card = AgentEfficiencyChartsCardView(summary: stateSummary)
                     .frame(width: 1080)
                     .padding(16)
-                    .background(Theme().neutrals.bg)
+                    .background(Theme.system.neutrals.bg)
                     .environment(\.colorScheme, scheme)
                 let bmp = try toolbarHeaderBitmap(for: card, scheme: scheme)
                 let png = try #require(bmp.representation(using: .png, properties: [:]))
@@ -3074,13 +3074,15 @@ struct DashboardWorkspaceTests {
                 )
                 .padding(20)
                 .frame(width: 1280, alignment: .topLeading)
-                .background(Theme().neutrals.bg)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: 400, alignment: .topLeading)
+                .background(Theme.system.neutrals.bg)
                 .environment(\.colorScheme, scheme)
                 let bmp = try toolbarHeaderBitmap(for: view, scheme: scheme)
                 let png = try #require(bmp.representation(using: .png, properties: [:]))
                 #expect(!png.isEmpty)
                 #expect(bmp.pixelsWide >= 1280)
-                #expect(bmp.pixelsHigh >= 200)
+                #expect(bmp.pixelsHigh >= 800)
                 #expect(!containsUnsupportedViewPlaceholder(bmp), "Unsupported-view yellow placeholder in goal-work-stream-\(stateName)-\(appearance)")
                 if let bgSample = bmp.colorAt(x: 8, y: 8)?.usingColorSpace(.sRGB) {
                     let lum = 0.2126 * Double(bgSample.redComponent)

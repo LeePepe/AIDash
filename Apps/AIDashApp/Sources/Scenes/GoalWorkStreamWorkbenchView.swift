@@ -132,7 +132,7 @@ public enum GoalFilterSegmentedBarVariant: String, CaseIterable, Sendable {
 public struct GoalFilterSegmentedBar: View {
     @Binding public var selection: GoalWorkStreamFilter
     public let variant: GoalFilterSegmentedBarVariant
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(
         selection: Binding<GoalWorkStreamFilter>,
@@ -218,7 +218,7 @@ public struct WorkStatusActionSplitBar: View {
     public let split: WorkStatusActionSplit
     public let height: CGFloat
     @State private var hoveredSegment: Int?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(split: WorkStatusActionSplit, height: CGFloat = 8) {
         self.split = split
@@ -277,7 +277,7 @@ public struct GoalWorkStreamWorkbenchView: View {
     @State private var selectedFilter: GoalWorkStreamFilter = .all
     @State private var expandedGoalIDs: Set<String>
     @State private var activeReceipt: SessionReceiptPresentation?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -843,7 +843,7 @@ private struct GoalWorkStreamExpandableRow: View {
     let reduceMotion: Bool
     let onToggleExpand: () -> Void
     let onOpenSessionReceipt: (WorkStatusSessionReceipt) -> Void
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1133,7 +1133,7 @@ public struct SessionWorkReceiptSheet: View {
     public let presentation: SessionReceiptPresentation
     @State private var showExtendedMetadata = true
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.locale) private var locale
 
     public init(presentation: SessionReceiptPresentation) {

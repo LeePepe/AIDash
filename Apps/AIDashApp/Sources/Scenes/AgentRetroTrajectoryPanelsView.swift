@@ -23,7 +23,7 @@ public enum AgentRetroWatermarkFilter: String, CaseIterable, Identifiable, Senda
 public struct AgentRetroTrajectoryPanelsView: View {
     public let retro: AgentRetroWorkbenchSummary?
     @State private var retroFilter: AgentRetroWatermarkFilter = .all
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.locale) private var locale
 
     public init(retro: AgentRetroWorkbenchSummary?) {
@@ -179,7 +179,7 @@ public struct AgentRetroSixLayerPanelView: View {
     public let retro: AgentRetroWorkbenchSummary
     @Binding public var filter: AgentRetroWatermarkFilter
     public let locale: Locale
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(
         retro: AgentRetroWorkbenchSummary,
@@ -414,7 +414,7 @@ public struct AgentRetroSixLayerPanelView: View {
 public struct AgentHorizonWastePanelView: View {
     public let retro: AgentRetroWorkbenchSummary
     public let locale: Locale
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(retro: AgentRetroWorkbenchSummary, locale: Locale = .current) {
         self.retro = retro

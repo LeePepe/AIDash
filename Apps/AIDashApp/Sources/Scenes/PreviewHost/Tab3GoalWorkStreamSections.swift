@@ -101,7 +101,7 @@ private struct PreviewGoalWorkStreamVariantCard: View {
     @State private var drawerExpanded = false
     @State private var selectedGoalIndex = 0
     @State private var activeFilter: GoalWorkStreamFilter = .all
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     private var expanded: Bool { globalExpandAll || drawerExpanded }
     private var goals: [PreviewGoalWorkMetric] { data.goalStreams }
