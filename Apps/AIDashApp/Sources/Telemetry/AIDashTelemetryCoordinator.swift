@@ -5,6 +5,17 @@ enum AIDashTelemetryAction: String, Sendable {
 }
 
 struct AIDashTelemetryEvent: Equatable, Sendable {
+    static let allowedScrollSections: Set<String> = [
+        "overview",
+        "goalWorkStream",
+        "scheduledPulse",
+        "agentEfficiency",
+        "actionItems",
+        "systemAndCosts",
+        "settings",
+        "briefing",
+    ]
+
     let name: String
     let properties: [String: String]
     let timestamp: Date
@@ -21,6 +32,27 @@ struct AIDashTelemetryEvent: Equatable, Sendable {
         AIDashTelemetryEvent(
             name: "aidash.performance.ready_scene",
             properties: ["duration_ms": String(durationMilliseconds)],
+            timestamp: timestamp
+        )
+    }
+
+    static func scrollHitchSession(
+        section: String,
+        hitchCount: Int,
+        severeHitchCount: Int,
+        maxFrameMilliseconds: Int64,
+        durationMilliseconds: Int64,
+        timestamp: Date
+    ) -> Self {
+        AIDashTelemetryEvent(
+            name: "aidash.performance.scroll_hitch",
+            properties: [
+                "section": section,
+                "hitch_count": String(hitchCount),
+                "severe_hitch_count": String(severeHitchCount),
+                "max_frame_ms": String(maxFrameMilliseconds),
+                "duration_ms": String(durationMilliseconds),
+            ],
             timestamp: timestamp
         )
     }
@@ -41,6 +73,7 @@ final class AIDashTelemetryCoordinator {
     private let launchStart: Duration?
     private let monotonicNow: () -> Duration
     private let wallNow: () -> Date
+    private let scrollLogFileURL: URL?
     private let reconciliationObserver: (AIDashTelemetryReconciliationEvent) -> Void
     private var service: AIDashTelemetryServicing?
     private var deliveryTask: Task<Void, Never>?
@@ -50,6 +83,7 @@ final class AIDashTelemetryCoordinator {
     private var desiredConsent = false
     private var acceptsReadyEvent = false
     private var didRecordReady = false
+    private var scrollLogWriteTask: Task<Void, Never>?
 
     init(
         mode: RunMode,
@@ -59,6 +93,7 @@ final class AIDashTelemetryCoordinator {
         launchStart: Duration?,
         monotonicNow: @escaping () -> Duration,
         wallNow: @escaping () -> Date = Date.init,
+        scrollLogFileURL: URL? = AIDashTelemetryCoordinator.defaultScrollLogFileURL(),
         reconciliationObserver: @escaping (AIDashTelemetryReconciliationEvent) -> Void = { _ in }
     ) {
         self.mode = mode
@@ -68,6 +103,7 @@ final class AIDashTelemetryCoordinator {
         self.launchStart = launchStart
         self.monotonicNow = monotonicNow
         self.wallNow = wallNow
+        self.scrollLogFileURL = scrollLogFileURL
         self.reconciliationObserver = reconciliationObserver
 
         guard mode == .gui,
@@ -172,6 +208,102 @@ final class AIDashTelemetryCoordinator {
         service.track(.action(.briefingViewed, timestamp: timestamp))
         service.track(.readyScene(durationMilliseconds: milliseconds, timestamp: timestamp))
         deliveryTask = Task { await service.flush() }
+    }
+
+    func recordScrollHitchSession(
+        section: String,
+        hitchCount: Int,
+        severeHitchCount: Int,
+        maxFrameMilliseconds: Int64,
+        durationMilliseconds: Int64
+    ) {
+        guard mode == .gui,
+              hitchCount > 0,
+              severeHitchCount >= 0,
+              severeHitchCount <= hitchCount,
+              maxFrameMilliseconds >= 0,
+              durationMilliseconds >= 0,
+              AIDashTelemetryEvent.allowedScrollSections.contains(section) else {
+            return
+        }
+        let timestamp = wallNow()
+        let event = AIDashTelemetryEvent.scrollHitchSession(
+            section: section,
+            hitchCount: hitchCount,
+            severeHitchCount: severeHitchCount,
+            maxFrameMilliseconds: maxFrameMilliseconds,
+            durationMilliseconds: durationMilliseconds,
+            timestamp: timestamp
+        )
+        if let scrollLogFileURL {
+            let previousTask = scrollLogWriteTask
+            scrollLogWriteTask = Self.enqueueLocalScrollLog(
+                event,
+                to: scrollLogFileURL,
+                after: previousTask
+            )
+        }
+        guard isConsentEnabled, let service else { return }
+        service.track(event)
+        resumeDelivery(using: service)
+    }
+
+    func awaitScrollLogWrites() async {
+        await scrollLogWriteTask?.value
+    }
+
+    nonisolated static func defaultScrollLogFileURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard environment["XCTestConfigurationFilePath"] == nil,
+              environment["XCTestBundlePath"] == nil else {
+            return nil
+        }
+        #if os(macOS)
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".aidash-state/scroll-telemetry.jsonl")
+        #else
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("AIDash/.aidash-state/scroll-telemetry.jsonl")
+        #endif
+    }
+
+    private nonisolated static func enqueueLocalScrollLog(
+        _ event: AIDashTelemetryEvent,
+        to fileURL: URL,
+        after previousTask: Task<Void, Never>?
+    ) -> Task<Void, Never>? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let payload: [String: Any] = [
+            "name": event.name,
+            "timestamp": formatter.string(from: event.timestamp),
+            "properties": event.properties,
+        ]
+        guard var data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+            return previousTask
+        }
+        data.append(0x0A)
+        return Task(priority: .utility) {
+            await previousTask?.value
+            do {
+                try FileManager.default.createDirectory(
+                    at: fileURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    let handle = try FileHandle(forWritingTo: fileURL)
+                    defer { try? handle.close() }
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: data)
+                } else {
+                    try data.write(to: fileURL, options: .atomic)
+                }
+            } catch {
+                // Best-effort local diagnostic log; telemetry coordinator must never throw or block UI.
+                return
+            }
+        }
     }
 
     func awaitDelivery() async {

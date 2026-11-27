@@ -155,6 +155,13 @@ struct AIDashTelemetryFactory {
                 "aidash.performance.ready_scene": [
                     "duration_ms": .finiteNumber,
                 ],
+                "aidash.performance.scroll_hitch": [
+                    "section": .label(AIDashTelemetryEvent.allowedScrollSections),
+                    "hitch_count": .finiteNumber,
+                    "severe_hitch_count": .finiteNumber,
+                    "max_frame_ms": .finiteNumber,
+                    "duration_ms": .finiteNumber,
+                ],
             ],
             apps: [configuration.app],
             builds: [configuration.build]

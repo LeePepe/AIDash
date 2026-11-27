@@ -3101,5 +3101,86 @@ struct DashboardWorkspaceTests {
             #expect(stateDarkLum < 0.15, "Expected dark OS .darkAqua canvas for \(stateName) without manual Theme(isDark:), got \(stateDarkLum)")
         }
     }
+
+    @Test("DashboardGeometryCapture short-circuits to zero GeometryReader when recorder is nil and refreshFromProviderIfStale throttles duplicate reads")
+    func geometryCaptureShortCircuitAndRefreshThrottling() throws {
+        #expect(!DashboardGeometryCapture.mountsGeometryReader(recorder: nil))
+        let activeRecorder = DashboardGeometryRecorder()
+        #expect(DashboardGeometryCapture.mountsGeometryReader(recorder: activeRecorder))
+
+        let report = try JSONDecoder().decode(
+            SkillsRoiReport.self,
+            from: TK3Fixtures.data("skills-roi-dense.json")
+        )
+        let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(skillsROI: report)
+
+        // Render without recorder (production path) and verify zero samples and valid layout
+        let prodView = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: .usage)
+            .frame(width: 1080)
+            .coordinateSpace(name: "tk3-geometry")
+        let prodHost = NSHostingView(rootView: prodView)
+        prodHost.frame = NSRect(x: 0, y: 0, width: 1080, height: 760)
+        prodHost.layoutSubtreeIfNeeded()
+        #expect(activeRecorder.samples.isEmpty)
+
+        // Render with recorder (test audit path) and verify geometry samples are still captured
+        let recordedView = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: .usage)
+            .frame(width: 1080)
+            .environment(\.dashboardGeometryRecorder, activeRecorder)
+            .coordinateSpace(name: "tk3-geometry")
+        let recordedHost = NSHostingView(rootView: recordedView)
+        recordedHost.frame = NSRect(x: 0, y: 0, width: 1080, height: 760)
+        recordedHost.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        #expect(!activeRecorder.samples.isEmpty)
+
+        // Verify refreshFromProviderIfStale skips duplicate synchronous I/O within minimumInterval
+        final class CountingStatusProvider: MenuBarSystemStatusProviding {
+            var captureCalls = 0
+            let snapshot: MenuBarSystemSnapshot
+            init(snapshot: MenuBarSystemSnapshot) { self.snapshot = snapshot }
+            func captureStatusState() -> MenuBarStatusViewState {
+                captureCalls += 1
+                return .populated(snapshot)
+            }
+            func captureComputerStatus() -> ComputerStatusSnapshot {
+                ComputerStatusSnapshot(
+                    capturedAt: snapshot.capturedAt,
+                    machine: snapshot.machine,
+                    cpu: snapshot.cpu,
+                    memory: snapshot.memory,
+                    network: snapshot.network,
+                    storage: snapshot.storage
+                )
+            }
+            func captureTokenStatus() -> (usage: CLITokenUsageSnapshot, capturedAt: Date) {
+                (snapshot.tokenUsage, snapshot.capturedAt)
+            }
+        }
+
+        var now = Date(timeIntervalSince1970: 1_764_246_000)
+        let provider = CountingStatusProvider(snapshot: sampleSnapshot())
+        let store = DashboardWorkspaceStore(
+            statusProvider: provider,
+            deferInitialRefresh: true,
+            topicCatalog: [],
+            sessionBindings: [:],
+            nowProvider: { now }
+        )
+        #expect(provider.captureCalls == 0)
+
+        store.refreshFromProviderIfStale(minimumInterval: 5.0)
+        #expect(provider.captureCalls == 1)
+
+        // Immediate repeat onAppear within 5s must be throttled
+        now = now.addingTimeInterval(1.5)
+        store.refreshFromProviderIfStale(minimumInterval: 5.0)
+        #expect(provider.captureCalls == 1)
+
+        // Explicit toolbar refresh bypasses throttle, and stale window (>5s) refreshes normally
+        now = now.addingTimeInterval(6.0)
+        store.refreshFromProviderIfStale(minimumInterval: 5.0)
+        #expect(provider.captureCalls == 2)
+    }
 }
 #endif

@@ -217,7 +217,6 @@ public enum GoalBadgeTone: Sendable {
 public struct WorkStatusActionSplitBar: View {
     public let split: WorkStatusActionSplit
     public let height: CGFloat
-    @State private var hoveredSegment: Int?
     private let theme = Theme.system
 
     public init(split: WorkStatusActionSplit, height: CGFloat = 8) {
@@ -226,42 +225,40 @@ public struct WorkStatusActionSplitBar: View {
     }
 
     public var body: some View {
-        GeometryReader { proxy in
-            let totalWidth = max(0, proxy.size.width)
-            let srRatio = CGFloat(min(max(split.searchReadPct / 100.0, 0), 1))
-            let ceRatio = CGFloat(min(max(split.codeEditPct / 100.0, 0), 1))
-            let vsRatio = CGFloat(min(max(split.verifyScriptPct / 100.0, 0), 1))
-            let swRatio = CGFloat(min(max(split.spinReworkPct / 100.0, 0), 1))
-            let sumRatio = srRatio + ceRatio + vsRatio + swRatio
+        let srRatio = CGFloat(min(max(split.searchReadPct / 100.0, 0), 1))
+        let ceRatio = CGFloat(min(max(split.codeEditPct / 100.0, 0), 1))
+        let vsRatio = CGFloat(min(max(split.verifyScriptPct / 100.0, 0), 1))
+        let swRatio = CGFloat(min(max(split.spinReworkPct / 100.0, 0), 1))
+        let sumRatio = srRatio + ceRatio + vsRatio + swRatio
 
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(theme.neutrals.inner)
-                if sumRatio > 0.001 {
-                    HStack(spacing: 1.5) {
-                        if srRatio > 0 {
-                            Rectangle()
-                                .fill(theme.chartCategorical(0))
-                                .frame(width: max(3, totalWidth * (srRatio / sumRatio)))
-                        }
-                        if ceRatio > 0 {
-                            Rectangle()
-                                .fill(theme.success)
-                                .frame(width: max(3, totalWidth * (ceRatio / sumRatio)))
-                        }
-                        if vsRatio > 0 {
-                            Rectangle()
-                                .fill(theme.primary.primary)
-                                .frame(width: max(3, totalWidth * (vsRatio / sumRatio)))
-                        }
-                        if swRatio > 0 {
-                            Rectangle()
-                                .fill(theme.warning)
-                                .frame(width: max(3, totalWidth * (swRatio / sumRatio)))
-                        }
-                    }
-                    .clipShape(Capsule())
-                }
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            let capsulePath = Capsule().path(in: rect)
+            context.fill(capsulePath, with: .color(theme.neutrals.inner))
+            guard sumRatio > 0.001, size.width > 0, size.height > 0 else { return }
+
+            let segments: [(ratio: CGFloat, color: Color)] = [
+                (srRatio, theme.chartCategorical(0)),
+                (ceRatio, theme.success),
+                (vsRatio, theme.primary.primary),
+                (swRatio, theme.warning),
+            ].filter { $0.ratio > 0 }
+            guard !segments.isEmpty else { return }
+
+            var clipContext = context
+            clipContext.clip(to: capsulePath)
+            let gap: CGFloat = 1.5
+            let totalGap = gap * CGFloat(max(0, segments.count - 1))
+            let usableWidth = max(0, size.width - totalGap)
+            var currentX: CGFloat = 0
+            for (index, segment) in segments.enumerated() {
+                let rawWidth = usableWidth * (segment.ratio / sumRatio)
+                let segmentWidth = index == segments.count - 1
+                    ? max(0, size.width - currentX)
+                    : min(max(3, rawWidth), max(0, size.width - currentX))
+                let segRect = CGRect(x: currentX, y: 0, width: segmentWidth, height: size.height)
+                clipContext.fill(Path(segRect), with: .color(segment.color))
+                currentX += segmentWidth + gap
             }
         }
         .frame(height: height)
@@ -425,26 +422,35 @@ public struct GoalWorkStreamWorkbenchView: View {
             filterAndLegendBar(snap: snap, visibleCount: filteredGoals.count)
             if filteredGoals.isEmpty {
                 scopedEmptyFilterBanner
+            } else if snap.goals.count > 8 {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    goalExpandableRows(filteredGoals)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(filteredGoals.prefix(24))) { goal in
-                        GoalWorkStreamExpandableRow(
-                            goal: goal,
-                            isExpanded: expandedGoalIDs.contains(goal.goalID),
-                            locale: locale,
-                            reduceMotion: reduceMotion,
-                            onToggleExpand: { toggleGoal(goal.goalID) },
-                            onOpenSessionReceipt: { session in
-                                activeReceipt = SessionReceiptPresentation(
-                                    goalTitle: goal.title,
-                                    goalRepo: goal.repo,
-                                    session: session
-                                )
-                            }
-                        )
-                    }
+                    goalExpandableRows(filteredGoals)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func goalExpandableRows(_ filteredGoals: [WorkStatusGoalRow]) -> some View {
+        ForEach(Array(filteredGoals.prefix(24))) { goal in
+            GoalWorkStreamExpandableRow(
+                goal: goal,
+                isExpanded: expandedGoalIDs.contains(goal.goalID),
+                locale: locale,
+                reduceMotion: reduceMotion,
+                onToggleExpand: { toggleGoal(goal.goalID) },
+                onOpenSessionReceipt: { session in
+                    activeReceipt = SessionReceiptPresentation(
+                        goalTitle: goal.title,
+                        goalRepo: goal.repo,
+                        session: session
+                    )
+                }
+            )
         }
     }
 
@@ -855,13 +861,10 @@ private struct GoalWorkStreamExpandableRow: View {
             .contentShape(Rectangle())
             .accessibilityLabel(goalAccessibilitySummary)
 
-            ClippedRevealLayout(progress: isExpanded ? 1.0 : 0.0) {
+            if isExpanded {
                 expandedChildSessionsSection
                     .padding(.top, 8)
             }
-            .clipped()
-            .allowsHitTesting(isExpanded)
-            .opacity(isExpanded ? 1 : 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

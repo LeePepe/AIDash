@@ -470,4 +470,131 @@ struct AIDashTelemetryCoordinatorTests {
         #expect(constructions == 0)
         #expect(coordinator.preferenceState == .establishedInvalid)
     }
+
+    @Test("scrollHitchSession emits typed event, enforces thresholds and section allowlist, and writes local JSONL")
+    func scrollHitchSessionTelemetryAndMonitor() async throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("aidash-scroll-telemetry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let logURL = tempDir.appendingPathComponent(".aidash-state/scroll-telemetry.jsonl")
+
+        let preferenceDefaults = defaults()
+        let identifier = UUID()
+        preferenceDefaults.set(identifier.uuidString, forKey: "telemetry.installID")
+        preferenceDefaults.set(true, forKey: "telemetry.identityEstablished")
+        preferenceDefaults.set(true, forKey: "telemetry.sendUsageData")
+        let service = TelemetryServiceSpy()
+        let fixedWall = Date(timeIntervalSince1970: 1_764_246_000)
+
+        let coordinator = AIDashTelemetryCoordinator(
+            mode: .gui,
+            preferences: AIDashTelemetryPreferences(defaults: preferenceDefaults, uuidGenerator: UUID.init),
+            configuration: validConfiguration(),
+            factory: AIDashTelemetryFactory { _ in service },
+            launchStart: .zero,
+            monotonicNow: { .milliseconds(100) },
+            wallNow: { fixedWall },
+            scrollLogFileURL: logURL
+        )
+
+        // Zero hitches, negative durations, and unknown sections are ignored
+        coordinator.recordScrollHitchSession(
+            section: "goalWorkStream",
+            hitchCount: 0,
+            severeHitchCount: 0,
+            maxFrameMilliseconds: 16,
+            durationMilliseconds: 420
+        )
+        coordinator.recordScrollHitchSession(
+            section: "unknown-free-text-section",
+            hitchCount: 2,
+            severeHitchCount: 1,
+            maxFrameMilliseconds: 120,
+            durationMilliseconds: 420
+        )
+        coordinator.recordScrollHitchSession(
+            section: "goalWorkStream",
+            hitchCount: 1,
+            severeHitchCount: 2,
+            maxFrameMilliseconds: 120,
+            durationMilliseconds: 420
+        )
+        #expect(service.events.isEmpty)
+
+        // Monitor samples >33ms as hitch and >100ms as severe hitch
+        var clockMs: Int64 = 0
+        var recordedSummaries: [AIDashScrollHitchSessionSummary] = []
+        let monitor = AIDashScrollHitchMonitor(
+            monotonicNow: { .milliseconds(clockMs) },
+            onSessionCompleted: { summary in
+                recordedSummaries.append(summary)
+                coordinator.recordScrollHitchSession(
+                    section: summary.section,
+                    hitchCount: summary.hitchCount,
+                    severeHitchCount: summary.severeHitchCount,
+                    maxFrameMilliseconds: summary.maxFrameMilliseconds,
+                    durationMilliseconds: summary.durationMilliseconds
+                )
+            }
+        )
+
+        monitor.beginScroll(section: "goalWorkStream", startSamplingLoop: false)
+        clockMs += 16
+        monitor.sampleFrame() // 16ms: smooth
+        clockMs += 45
+        monitor.sampleFrame() // 45ms: hitch (>33ms)
+        clockMs += 118
+        monitor.sampleFrame() // 118ms: hitch + severe hitch (>100ms)
+        clockMs += 16
+        let summary = try #require(monitor.endScroll())
+
+        #expect(summary.section == "goalWorkStream")
+        #expect(summary.hitchCount == 2)
+        #expect(summary.severeHitchCount == 1)
+        #expect(summary.maxFrameMilliseconds == 118)
+        #expect(summary.durationMilliseconds == 195)
+        #expect(recordedSummaries == [summary])
+
+        await coordinator.awaitDelivery()
+        await coordinator.awaitScrollLogWrites()
+
+        #expect(service.events.count == 1)
+        let emitted = try #require(service.events.first)
+        #expect(emitted.name == "aidash.performance.scroll_hitch")
+        #expect(emitted.timestamp == fixedWall)
+        #expect(emitted.properties == [
+            "section": "goalWorkStream",
+            "hitch_count": "2",
+            "severe_hitch_count": "1",
+            "max_frame_ms": "118",
+            "duration_ms": "195",
+        ])
+        #expect(service.flushCount == 1)
+
+        // When consent is disabled, remote service does not receive events, while local diagnostic log still appends
+        await coordinator.setConsent(false)
+        coordinator.recordScrollHitchSession(
+            section: "agentEfficiency",
+            hitchCount: 1,
+            severeHitchCount: 0,
+            maxFrameMilliseconds: 48,
+            durationMilliseconds: 310
+        )
+        await coordinator.awaitScrollLogWrites()
+        #expect(service.events.count == 1)
+
+        let logLines = try String(contentsOf: logURL, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        #expect(logLines.count == 2)
+        let firstObj = try #require(JSONSerialization.jsonObject(with: Data(logLines[0].utf8)) as? [String: Any])
+        #expect(firstObj["name"] as? String == "aidash.performance.scroll_hitch")
+        let firstProps = try #require(firstObj["properties"] as? [String: String])
+        #expect(firstProps["section"] == "goalWorkStream")
+        #expect(firstProps["max_frame_ms"] == "118")
+
+        // XCTest environment guard returns nil default path so tests never touch live ~/.aidash-state
+        #expect(AIDashTelemetryCoordinator.defaultScrollLogFileURL(environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"]) == nil)
+        #expect(AIDashTelemetryCoordinator.defaultScrollLogFileURL(environment: [:])?.path.hasSuffix("/.aidash-state/scroll-telemetry.jsonl") == true)
+    }
 }

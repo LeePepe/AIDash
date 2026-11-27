@@ -50,13 +50,28 @@ struct DashboardGeometryCapture: ViewModifier {
     let id: String
     let role: String
 
+    static func mountsGeometryReader(recorder: DashboardGeometryRecorder?) -> Bool {
+        recorder != nil
+    }
+
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content.background {
-            GeometryReader { proxy in
-                Color.clear.onAppear {
-                    recorder?.record(DashboardGeometrySample(id: id, role: role, frame: proxy.frame(in: .named("tk3-geometry"))))
+        if let recorder {
+            content.background {
+                GeometryReader { proxy in
+                    Color.clear.onAppear {
+                        recorder.record(
+                            DashboardGeometrySample(
+                                id: id,
+                                role: role,
+                                frame: proxy.frame(in: .named("tk3-geometry"))
+                            )
+                        )
+                    }
                 }
             }
+        } else {
+            content
         }
     }
 }
@@ -1521,6 +1536,8 @@ public struct AIDashMacWorkspaceView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
     @State private var activeOverviewLens: OverviewWorkbenchLens = .trends
     @State private var showPreviewHostGallery = false
+    @State private var scrollHitchMonitor: AIDashScrollHitchMonitor?
+    private let telemetryCoordinator: AIDashTelemetryCoordinator?
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let theme = Theme.system
@@ -1530,10 +1547,40 @@ public struct AIDashMacWorkspaceView: View {
         scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)? = nil,
         acknowledgedScheduledActionIDs: Set<String> = []
     ) {
+        self.init(
+            store: store,
+            telemetryCoordinator: nil,
+            scheduledActionWriter: scheduledActionWriter,
+            acknowledgedScheduledActionIDs: acknowledgedScheduledActionIDs
+        )
+    }
+
+    init(
+        store: DashboardWorkspaceStore? = nil,
+        telemetryCoordinator: AIDashTelemetryCoordinator?,
+        scheduledActionWriter: ((ScheduledJobAction, [ScheduledJobActionResponse]) -> Bool)? = nil,
+        acknowledgedScheduledActionIDs: Set<String> = []
+    ) {
         let resolvedStore = store ?? DashboardWorkspaceStore.shared
         resolvedStore.scheduledActionWriter = scheduledActionWriter
         resolvedStore.acknowledgedScheduledActionIDs = acknowledgedScheduledActionIDs
+        self.telemetryCoordinator = telemetryCoordinator
         _store = State(initialValue: resolvedStore)
+        if let telemetryCoordinator {
+            _scrollHitchMonitor = State(
+                initialValue: .live { [weak telemetryCoordinator] summary in
+                    telemetryCoordinator?.recordScrollHitchSession(
+                        section: summary.section,
+                        hitchCount: summary.hitchCount,
+                        severeHitchCount: summary.severeHitchCount,
+                        maxFrameMilliseconds: summary.maxFrameMilliseconds,
+                        durationMilliseconds: summary.durationMilliseconds
+                    )
+                }
+            )
+        } else {
+            _scrollHitchMonitor = State(initialValue: nil)
+        }
     }
 
     public var body: some View {
@@ -1542,7 +1589,7 @@ public struct AIDashMacWorkspaceView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
         } detail: {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     if case let .populated(snapshot) = store.systemState {
                         workspaceDetailContent(snapshot: snapshot)
                     }
@@ -1551,6 +1598,16 @@ public struct AIDashMacWorkspaceView: View {
                 .padding(20)
                 .frame(maxWidth: 1680, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .onScrollPhaseChange { _, newPhase in
+                if newPhase.isScrolling {
+                    scrollHitchMonitor?.beginScroll(section: store.selectedSection.rawValue)
+                } else {
+                    scrollHitchMonitor?.endScroll()
+                }
+            }
+            .onDisappear {
+                scrollHitchMonitor?.endScroll()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(theme.neutrals.bg, ignoresSafeAreaEdges: .all)

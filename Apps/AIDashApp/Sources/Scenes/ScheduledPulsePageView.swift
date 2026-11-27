@@ -236,7 +236,7 @@ public struct ScheduledPulsePageView: View {
         .onAppear {
             registerJobs()
             if store.scheduledJobFrameworkSnapshot.entries.isEmpty {
-                store.refreshFromProvider()
+                store.refreshFromProviderIfStale()
             }
         }
     }

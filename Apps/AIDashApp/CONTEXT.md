@@ -11,7 +11,7 @@
     "The app reads briefings and writes append-only user events; it never authors briefing content.",
     "The app owns the sole CloudKit identity and XPC server endpoint.",
     "Product telemetry is explicit-consent, GUI-only, and retains its lifetime identity and pending work when disabled.",
-    "Only aidash.action and aidash.performance.ready_scene are admitted; no reset or identity rotation surface exists.",
+    "Only aidash.action, aidash.performance.ready_scene, and aidash.performance.scroll_hitch are admitted; no reset or identity rotation surface exists.",
     "Local tests use only the hostless AIDashAppLogicTests scheme.",
     "Host-based AIDashAppTests run only in CI or with explicit user authorization.",
     "MenuBar NSHostingView panels must place .padding inside .frame(width:) so fittingSize.width equals frame.width, hide duplicate summary NSMenuItems (isHidden = true), and keep Localizable.xcstrings locale sets complete so no raw keys leak."
