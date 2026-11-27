@@ -280,7 +280,7 @@ struct DesignTokensFoundationTests {
 
     @Test("AIDashChrome.stripeColor: neutral=nil, others resolve from theme tokens")
     func stripeColorMapping() {
-        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
+        let theme = Theme.system
         #expect(AIDashChrome.stripeColor(for: .neutral, theme: theme) == nil)
         #expect(AIDashChrome.stripeColor(for: .success, theme: theme) == theme.success)
         #expect(AIDashChrome.stripeColor(for: .warning, theme: theme) == theme.warning)

@@ -154,7 +154,7 @@ public struct TrendingCardView: View {
 // Rows with neither reason nor category collapse to the single title line.
 
 private struct TrendingItemRow: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.starredItemRefs) private var starredItemRefs
     let item: TrendingPayload.Item
     let rank: Int
@@ -299,7 +299,7 @@ private struct TrendingItemRow: View {
 // Separated from siblings by grid spacing only — no per-cell background.
 
 private struct TrendingRepoCell: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.starredItemRefs) private var starredItemRefs
     let item: TrendingPayload.Item
     let rank: Int
@@ -417,7 +417,7 @@ private struct TrendingRepoCell: View {
 // star events via `starredItemRefs`.
 
 private struct StarItemButton: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.onStarItem) private var onStarItem
     @Environment(\.currentCardId) private var currentCardId
     let itemRef: String

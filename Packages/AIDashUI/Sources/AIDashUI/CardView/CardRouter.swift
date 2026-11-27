@@ -12,7 +12,7 @@ public struct CardRouter: View {
     /// too thin to justify the authored size). Defaults to `card.size` so a
     /// router used in isolation renders at the authored geometry.
     let effectiveSize: CardSize
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.starredCardIds) private var starredCardIds
     @Environment(\.hiddenCardIds) private var hiddenCardIds
 

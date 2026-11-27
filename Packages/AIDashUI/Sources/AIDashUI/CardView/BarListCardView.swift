@@ -19,7 +19,7 @@ public struct BarListCardView: View {
     let payload: BarListPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(payload: BarListPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -161,7 +161,7 @@ public struct BarListCardView: View {
 // distinction survives grayscale / color-blind viewing.
 
 private struct BarListRow: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     let item: BarListPayload.Item
     let fraction: Double
     let anySemantic: Bool

@@ -13,7 +13,7 @@ public enum AIDashWidgetFamily: String, Sendable, Equatable, CaseIterable {
 @MainActor
 public struct NeedsPersonLinearWidgetView: View {
     public let snapshot: WidgetBriefingSnapshot
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(snapshot: WidgetBriefingSnapshot) {
         self.snapshot = snapshot
@@ -62,7 +62,7 @@ public struct NeedsPersonLinearWidgetView: View {
 @MainActor
 public struct EfficiencyTimeWidgetView: View {
     public let snapshot: WidgetBriefingSnapshot
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(snapshot: WidgetBriefingSnapshot) {
         self.snapshot = snapshot
@@ -119,7 +119,7 @@ public struct EfficiencyTimeWidgetView: View {
 @MainActor
 public struct SpendQuotaWidgetView: View {
     public let snapshot: WidgetBriefingSnapshot
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(snapshot: WidgetBriefingSnapshot) {
         self.snapshot = snapshot
@@ -174,7 +174,7 @@ public struct SpendQuotaWidgetView: View {
 @MainActor
 public struct MacSiliconCockpitWidgetView: View {
     public let snapshot: WidgetSystemSnapshot
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(snapshot: WidgetSystemSnapshot) {
         self.snapshot = snapshot

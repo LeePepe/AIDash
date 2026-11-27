@@ -23,7 +23,7 @@ private enum BriefingViewCopy {
 }
 
 public struct BriefingView: View { // swiftlint:disable:this type_body_length
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.hiddenCardIds) private var hiddenCardIds
     @Environment(\.onHideCard) private var onHideCard
     @Query private var todaysBriefings: [BriefingModel]

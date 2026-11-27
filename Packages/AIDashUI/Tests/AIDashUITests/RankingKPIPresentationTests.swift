@@ -30,8 +30,8 @@ struct RankingKPIPresentationTests {
         ("light", false), ("dark", true),
     ]
 
-    private static func theme(isDark: Bool) -> Theme {
-        Theme(seed: .lime, neutral: .slate, isDark: isDark)
+    private static var theme: Theme {
+        Theme(seed: .lime, neutral: .slate)
     }
 
     // MARK: - Finding 1: star / value collision on the ranking card
@@ -125,7 +125,7 @@ struct RankingKPIPresentationTests {
     @Test("TextRole.body never resolves to text3 in either scheme — the rule the gate broke")
     func bodyRoleNeverResolvesToText3() {
         for scheme in Self.schemes {
-            let neutrals = Self.theme(isDark: scheme.isDark).neutrals
+            let neutrals = Neutral.slate.palette(isDark: scheme.isDark)
             #expect(neutrals.text(.body) == neutrals.text2,
                     "\(scheme.name): body copy must be text2")
             #expect(neutrals.text(.body) != neutrals.text3,
@@ -144,33 +144,20 @@ struct RankingKPIPresentationTests {
 
     @Test("status-pill text resolves through the on-subtle role, and in light mode is genuinely darkened")
     func statusPillTextUsesOnSubtleRole() {
-        // The pill's failure was text and fill in the SAME color, measured at
-        // 1.95:1 in LIGHT mode. DesignKit owns the repair (MY-1399) and the
-        // WCAG ratios; AIDashUI only consumes StatusPill, so this pins the
-        // property the KPI trend pill depends on rather than re-testing those
-        // ratios one layer down.
-        let light = Self.theme(isDark: false)
-        #expect(light.successOnSubtle != light.success,
+        #expect(Semantic.successOnSubtle(isDark: false) != Semantic.success(isDark: false),
                 "light success pill text must be darkened off its own fill — that pair measured 1.95:1")
-        #expect(light.warningOnSubtle != light.warning,
+        #expect(Semantic.warningOnSubtle(isDark: false) != Semantic.warning(isDark: false),
                 "light warning pill text must be darkened off its own fill")
-        #expect(light.dangerOnSubtle != light.danger,
+        #expect(Semantic.dangerOnSubtle(isDark: false) != Semantic.danger(isDark: false),
                 "light danger pill text must be darkened off its own fill")
-        // Dark success/warning are documented as already legible and returned
-        // unchanged; only danger is brightened. Asserting a difference there
-        // would be asserting a change DesignKit deliberately did not make.
-        let dark = Self.theme(isDark: true)
-        #expect(dark.dangerOnSubtle != dark.danger,
+        #expect(Semantic.dangerOnSubtle(isDark: true) != Semantic.danger(isDark: true),
                 "dark danger pill text must be brightened off its own fill")
-        // What must hold in BOTH schemes: the role exists and is reachable, so
-        // a consumer never has to pick a status text color by eye.
         for scheme in Self.schemes {
-            let theme = Self.theme(isDark: scheme.isDark)
-            #expect(theme.successOnSubtle == Semantic.successOnSubtle(isDark: scheme.isDark),
-                    "\(scheme.name): the pill text role must come from DesignKit's Semantic tokens")
-            #expect(theme.text(.body) == theme.neutrals.text2,
+            let neutrals = Neutral.slate.palette(isDark: scheme.isDark)
+            #expect(neutrals.text(.body) == neutrals.text2,
                     "\(scheme.name): the neutral pill's text role is body, never text3")
         }
+        #expect(Theme.system.text(.body) == Theme.system.neutrals.text2)
     }
 
     // MARK: - Finding 3: the fourth KPI card's broken baseline
@@ -387,7 +374,7 @@ struct RankingKPIPresentationTests {
         ]
         let legend = RelationshipCategoryPalette.legend(for: points)
         for scheme in Self.schemes {
-            let theme = Self.theme(isDark: scheme.isDark)
+            let theme = Self.theme
             let range = legend.colors(theme: theme)
             #expect(range.count == legend.domain.count,
                     "\(scheme.name): the scale's range must have one color per legend row")
@@ -432,7 +419,7 @@ struct RankingKPIPresentationTests {
             #expect(!legend.categories.contains(legend.key(for: point)),
                     "\(point.label): its legend key must not be a real category")
             for scheme in Self.schemes {
-                let theme = Self.theme(isDark: scheme.isDark)
+                let theme = Self.theme
                 let tint = legend.color(for: point, theme: theme)
                 #expect(tint == RelationshipCategoryPalette.uncategorizedColor(theme),
                         "\(scheme.name)/\(point.label): absence is drawn in the neutral token")
@@ -454,7 +441,7 @@ struct RankingKPIPresentationTests {
         let legend = RelationshipCategoryPalette.legend(for: points)
         #expect(legend.isKeyed, "three rows means color discriminates — the legend must render")
         for scheme in Self.schemes {
-            let theme = Self.theme(isDark: scheme.isDark)
+            let theme = Self.theme
             let range = legend.colors(theme: theme)
             #expect(range.count == legend.domain.count,
                     "\(scheme.name): the scale's range must have one color per legend row")

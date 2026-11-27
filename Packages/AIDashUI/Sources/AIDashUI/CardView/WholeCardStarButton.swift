@@ -14,7 +14,7 @@ import DesignKit
 /// coexisting with any per-item star a card type may also render (e.g. the
 /// trending radar's `StarItemButton`).
 struct WholeCardStarButton: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.onStarCard) private var onStarCard
     @Environment(\.onHideCard) private var onHideCard
     let cardId: String

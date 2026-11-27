@@ -15,7 +15,7 @@ struct CardEmptyState: View {
     /// Short caption describing what is absent, e.g. "无指标数据". Callers pass
     /// an already-localized string so each card type can name its own content.
     let message: String
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.cardChromeMode) private var chromeMode
 
     var body: some View {

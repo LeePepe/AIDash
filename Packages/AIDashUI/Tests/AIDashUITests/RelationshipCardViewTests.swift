@@ -202,7 +202,7 @@ struct RelationshipCardViewTests {
 
     @Test("every color the renderer resolves comes from theme tokens, never a literal")
     func colorsComeFromTheme() {
-        let theme = Theme(seed: .lime, neutral: .slate, isDark: true)
+        let theme = Theme.system
         #expect(RelationshipCategoryPalette.color(slot: 0, theme: theme) == theme.chartCategorical(0))
         #expect(RelationshipCategoryPalette.color(slot: 1, theme: theme) == theme.chartCategorical(1))
         #expect(RelationshipHeatmapScale.baseColor(theme) == theme.classificationTint(.relationship))
@@ -666,13 +666,13 @@ struct RelationshipCardViewTests {
         }
     }
 
-    @Test("renderer reads typography from the per-type recipe and colors from the injected Theme")
+    @Test("renderer reads typography from the per-type recipe and colors from Theme.system")
     func rendererReadsTokens() throws {
         let source = try DesignTokensComplianceTests.rendererSource(for: .relationship)
         #expect(source.contains("AIDashTypography.detail(for: .relationship)"),
                 "relationship renderer must read typography from the per-type recipe")
-        #expect(source.contains("@Environment(\\.theme)"),
-                "relationship renderer must resolve colors from the injected Theme")
+        #expect(source.contains("Theme.system"),
+                "relationship renderer must resolve colors from Theme.system")
     }
 
     @Test("layout adapts responsively via ViewThatFits, not by branching typography on size")

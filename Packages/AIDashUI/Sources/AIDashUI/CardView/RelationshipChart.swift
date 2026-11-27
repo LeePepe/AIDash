@@ -74,7 +74,7 @@ enum RelationshipChartAxis {
 struct RelationshipChart: View {
     let payload: RelationshipPayload
     let size: CardSize
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     var body: some View {
         chart

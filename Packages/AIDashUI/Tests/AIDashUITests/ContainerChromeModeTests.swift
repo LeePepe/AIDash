@@ -198,7 +198,7 @@ struct ContainerChromeModeTests {
         arguments: CardStyle.allCases
     )
     func styleSemanticsSurviveInBareMode(style: CardStyle) {
-        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
+        let theme = Theme.system
         let bar = AIDashChrome.stripeColor(for: style, theme: theme)
 
         switch style {
@@ -396,13 +396,8 @@ struct ContainerChromeModeTests {
     // source slices below prove the modifier's two branches in isolation;
     // this proves the wiring between container and card).
 
-    private static let probeSeed: Seed = .lime
-    private static let probeNeutral: Neutral = .slate
-
-    /// The two tiers the probe distinguishes, resolved from the same palette
-    /// the render below uses — never a hardcoded hex (§Design System & Tokens).
     private static var probePalette: Neutrals {
-        probeNeutral.palette(isDark: false)
+        Neutral.slate.palette(isDark: false)
     }
 
     /// Fraction of the rendered container covered by each luminance tier.
@@ -414,12 +409,10 @@ struct ContainerChromeModeTests {
     /// Rasterise a container of `cardCount` cards on the page background and
     /// measure what fraction of it each neutral tier covers.
     private static func surfaceCoverage(cardCount: Int) throws -> SurfaceCoverage {
-        let theme = Theme(seed: probeSeed, neutral: probeNeutral)
         let view = ContainerView(container: container(cardCount: cardCount))
             .padding(AIDashSpace.s24)
             .frame(width: 600, alignment: .leading)
-            .background(theme.neutrals.bg)
-            .environment(\.theme, theme)
+            .background(Theme.system.neutrals.bg)
             .environment(\.colorScheme, .light)
 
         #if canImport(AppKit)

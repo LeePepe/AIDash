@@ -177,7 +177,7 @@ extension CardType {
 
 public struct CardTypeBadge: View {
     public let type: CardType
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(type: CardType) {
         self.type = type
@@ -439,7 +439,7 @@ public struct CardChromeModifier: ViewModifier {
     public let size: CardSize
     public let style: CardStyle
     public let minHeightOverride: CGFloat?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.cardChromeMode) private var chromeMode
 
     public init(size: CardSize, style: CardStyle, minHeightOverride: CGFloat? = nil) {
@@ -556,7 +556,7 @@ extension View {
 }
 
 public struct StatChipSurfaceModifier: ViewModifier {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     public init() {}
     public func body(content: Content) -> some View {
         content.background(theme.neutrals.inner, in: Capsule(style: .continuous))
@@ -566,7 +566,7 @@ public struct StatChipSurfaceModifier: ViewModifier {
 public struct InnerSurfaceModifier: ViewModifier {
     public let padding: CGFloat
     public let role: InnerSurfaceRole
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.cardChromeMode) private var chromeMode
 
     public init(padding: CGFloat = 12, role: InnerSurfaceRole = .emphasis) {

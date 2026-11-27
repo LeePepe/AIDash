@@ -6,7 +6,7 @@ public struct InsightCardView: View {
     let payload: InsightPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(payload: InsightPayload, size: CardSize, style: CardStyle) {
         self.payload = payload

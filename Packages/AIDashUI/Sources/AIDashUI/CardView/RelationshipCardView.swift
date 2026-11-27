@@ -27,7 +27,7 @@ public struct RelationshipCardView: View {
     let payload: RelationshipPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(payload: RelationshipPayload, size: CardSize, style: CardStyle) {
         self.payload = payload

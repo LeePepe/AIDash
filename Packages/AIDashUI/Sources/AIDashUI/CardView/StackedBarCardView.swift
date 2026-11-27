@@ -22,7 +22,7 @@ public struct StackedBarCardView: View {
     let payload: StackedBarPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(payload: StackedBarPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -199,7 +199,7 @@ private struct StackedBarTrack: View {
 // swatch color.
 
 private struct StackedBarLegendRow: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     let slice: StackedBarSlice
     let total: Double
 

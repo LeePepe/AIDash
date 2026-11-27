@@ -106,7 +106,7 @@ struct DataDrivenBriefingEvidenceTests {
     }
 
     private struct ThemedPage: View {
-        @Environment(\.theme) private var theme
+        private let theme = Theme.system
         let containers: [ContainerModel]
 
         var body: some View {

@@ -314,7 +314,7 @@ struct DesignTokensComplianceTests {
         arguments: CardStyle.allCases
     )
     func metricStyleOrthogonalityStripeColor(style: CardStyle) {
-        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
+        let theme = Theme.system
         switch style {
         case .neutral:
             #expect(AIDashChrome.stripeColor(for: .neutral, theme: theme) == nil,

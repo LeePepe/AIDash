@@ -63,7 +63,7 @@ struct StackedBarCardViewTests {
 
     @Test("quality-gradient bar: semantic segments take status colors, in-between segments go quiet neutral grey")
     func sliceColoringQualityGradient() {
-        let theme = Theme(seed: .lime, neutral: .slate, isDark: true)
+        let theme = Theme.system
         // good / neutral / bad — the session-quality shape (has semantics).
         let segments = [
             StackedBarPayload.Segment(label: "end_turn", value: 70, semantic: "success"),
@@ -84,7 +84,7 @@ struct StackedBarCardViewTests {
 
     @Test("pure-category bar (no semantics): every segment takes a distinct chartCategorical color")
     func sliceColoringCategorical() {
-        let theme = Theme(seed: .lime, neutral: .slate, isDark: true)
+        let theme = Theme.system
         let segments = [
             StackedBarPayload.Segment(label: "opus-4.6-1m", value: 73.5),
             StackedBarPayload.Segment(label: "opus-4.7", value: 18),
@@ -101,7 +101,7 @@ struct StackedBarCardViewTests {
 
     @Test("fractions sum to 1 for a positive-total payload and are 0 for an all-zero payload")
     func fractions() {
-        let theme = Theme(seed: .lime, neutral: .slate, isDark: false)
+        let theme = Theme.system
         let slices = StackedBarSliceResolver.resolve(
             segments: [.init(label: "a", value: 3), .init(label: "b", value: 1)],
             theme: theme

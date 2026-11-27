@@ -6,7 +6,7 @@ public struct MetricCardView: View {
     let payload: MetricPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(payload: MetricPayload, size: CardSize, style: CardStyle) {
         self.payload = payload

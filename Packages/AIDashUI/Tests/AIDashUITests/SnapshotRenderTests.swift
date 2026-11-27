@@ -63,7 +63,7 @@ struct SnapshotRenderTests {
                 .padding(.horizontal, padding)
                 .padding(.vertical, AIDashSpacing.pageVertical)
                 .frame(width: width, alignment: .topLeading)
-                .background(Theme().neutrals.bg)
+                .background(Theme.system.neutrals.bg)
                 .environment(\.colorScheme, scheme)
                 .environment(\.hiddenCardIds, hiddenCardIds)
             var renderedImage: NSImage?
