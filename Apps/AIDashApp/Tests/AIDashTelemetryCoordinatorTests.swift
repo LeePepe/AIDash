@@ -571,7 +571,29 @@ struct AIDashTelemetryCoordinatorTests {
         ])
         #expect(service.flushCount == 1)
 
-        // When consent is disabled, remote service does not receive events, while local diagnostic log still appends
+        // Never-opted coordinator must neither emit events nor create local scroll telemetry storage
+        let neverOptedLogURL = tempDir.appendingPathComponent("never-opted/.aidash-state/scroll-telemetry.jsonl")
+        let neverOptedCoordinator = AIDashTelemetryCoordinator(
+            mode: .gui,
+            preferences: AIDashTelemetryPreferences(defaults: defaults(), uuidGenerator: UUID.init),
+            configuration: validConfiguration(),
+            factory: AIDashTelemetryFactory { _ in TelemetryServiceSpy() },
+            launchStart: .zero,
+            monotonicNow: { .milliseconds(50) },
+            wallNow: { fixedWall },
+            scrollLogFileURL: neverOptedLogURL
+        )
+        neverOptedCoordinator.recordScrollHitchSession(
+            section: "overview",
+            hitchCount: 3,
+            severeHitchCount: 1,
+            maxFrameMilliseconds: 112,
+            durationMilliseconds: 250
+        )
+        await neverOptedCoordinator.awaitScrollLogWrites()
+        #expect(!FileManager.default.fileExists(atPath: neverOptedLogURL.path))
+
+        // When consent is disabled, admission closes immediately for both remote service and local JSONL while retaining prior records
         await coordinator.setConsent(false)
         coordinator.recordScrollHitchSession(
             section: "agentEfficiency",
@@ -586,12 +608,29 @@ struct AIDashTelemetryCoordinatorTests {
         let logLines = try String(contentsOf: logURL, encoding: .utf8)
             .split(whereSeparator: \.isNewline)
             .map(String.init)
-        #expect(logLines.count == 2)
+        #expect(logLines.count == 1)
         let firstObj = try #require(JSONSerialization.jsonObject(with: Data(logLines[0].utf8)) as? [String: Any])
         #expect(firstObj["name"] as? String == "aidash.performance.scroll_hitch")
         let firstProps = try #require(firstObj["properties"] as? [String: String])
         #expect(firstProps["section"] == "goalWorkStream")
         #expect(firstProps["max_frame_ms"] == "118")
+
+        // Re-enabling consent admits subsequent scroll hitch sessions again
+        await coordinator.setConsent(true)
+        coordinator.recordScrollHitchSession(
+            section: "agentEfficiency",
+            hitchCount: 1,
+            severeHitchCount: 0,
+            maxFrameMilliseconds: 48,
+            durationMilliseconds: 310
+        )
+        await coordinator.awaitDelivery()
+        await coordinator.awaitScrollLogWrites()
+        #expect(service.events.count == 2)
+        let updatedLines = try String(contentsOf: logURL, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+        #expect(updatedLines.count == 2)
 
         // XCTest environment guard returns nil default path so tests never touch live ~/.aidash-state
         #expect(AIDashTelemetryCoordinator.defaultScrollLogFileURL(environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"]) == nil)

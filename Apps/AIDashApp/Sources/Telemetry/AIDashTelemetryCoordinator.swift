@@ -218,6 +218,10 @@ final class AIDashTelemetryCoordinator {
         durationMilliseconds: Int64
     ) {
         guard mode == .gui,
+              desiredConsent,
+              isConsentEnabled,
+              let service,
+              service.isEnabled,
               hitchCount > 0,
               severeHitchCount >= 0,
               severeHitchCount <= hitchCount,
@@ -243,7 +247,6 @@ final class AIDashTelemetryCoordinator {
                 after: previousTask
             )
         }
-        guard isConsentEnabled, let service else { return }
         service.track(event)
         resumeDelivery(using: service)
     }
