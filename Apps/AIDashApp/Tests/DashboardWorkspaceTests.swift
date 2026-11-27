@@ -2315,6 +2315,64 @@ struct DashboardWorkspaceTests {
         )
         #expect(legacy.qualityBehavior == nil)
         #expect(legacy.qualityJudge == nil)
+
+        let boolJudgedPayload = """
+        {
+          "metadata": {"sample_size": 4, "coverage_status": "healthy"},
+          "diagnostics": {},
+          "quality_judge": {
+            "eligible_skill_count": 3,
+            "judged_skill_count": 2,
+            "coverage_pct": 66.7,
+            "skills": [
+              {
+                "skill": "team-lead",
+                "eligible": true,
+                "sampled": 3,
+                "judged": true,
+                "valid_judgements": 2,
+                "score_mean": 4.5
+              },
+              {
+                "skill": "aidash-metrics",
+                "eligible": true,
+                "sampled": 1,
+                "judged": true,
+                "score_mean": 4.0
+              },
+              {
+                "skill": "xcode-cli",
+                "eligible": true,
+                "sampled": 0,
+                "judged": false,
+                "valid_judgements": 0
+              }
+            ]
+          }
+        }
+        """
+        let boolJudgedReport = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(boolJudgedPayload.utf8))
+        let boolJudge = try #require(boolJudgedReport.qualityJudge)
+        #expect(boolJudge.skills.count == 3)
+        #expect(boolJudge.skills[0].judged == 2)
+        #expect(boolJudge.skills[0].validJudgements == 2)
+        #expect(boolJudge.skills[1].judged == 1)
+        #expect(boolJudge.skills[2].judged == 0)
+        #expect(SkillsRoiDiagnosticsCardView.aggregateJudgeMean(boolJudge) == (4.5 * 2.0 + 4.0 * 1.0) / 3.0)
+
+        let malformedQualityPayload = """
+        {
+          "sample_size": 5,
+          "coverage_status": "healthy",
+          "diagnostics": {},
+          "quality_behavior": {"unexpected": "object"},
+          "quality_judge": ["unexpected", "array"]
+        }
+        """
+        let malformedQualityReport = try JSONDecoder().decode(SkillsRoiReport.self, from: Data(malformedQualityPayload.utf8))
+        #expect(malformedQualityReport.metadata.sample == 5)
+        #expect(malformedQualityReport.qualityBehavior == nil)
+        #expect(malformedQualityReport.qualityJudge == nil)
     }
 
     @Test("Skills 4x4 object lenses and quality-driven aggregates stay deterministic")

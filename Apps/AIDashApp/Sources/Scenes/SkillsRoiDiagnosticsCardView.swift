@@ -1982,6 +1982,29 @@
             case rubricVersion = "rubric_version"
             case judgeModel = "judge_model"
         }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            skill = try c.decode(String.self, forKey: .skill)
+            eligible = try c.decodeIfPresent(Bool.self, forKey: .eligible)
+            eligibleInvocations = try c.decodeIfPresent(Int.self, forKey: .eligibleInvocations)
+            sampled = try c.decodeIfPresent(Int.self, forKey: .sampled)
+            let decodedValidJudgements = try c.decodeIfPresent(Int.self, forKey: .validJudgements)
+            validJudgements = decodedValidJudgements
+            if let judgedInt = try? c.decodeIfPresent(Int.self, forKey: .judged) {
+                judged = judgedInt
+            } else if let judgedBool = try? c.decodeIfPresent(Bool.self, forKey: .judged) {
+                judged = judgedBool ? max(1, decodedValidJudgements ?? 1) : 0
+            } else {
+                judged = nil
+            }
+            coverageStatus = try c.decodeIfPresent(String.self, forKey: .coverageStatus)
+            coveragePct = try c.decodeIfPresent(Double.self, forKey: .coveragePct)
+            scoreMean = try c.decodeIfPresent(Double.self, forKey: .scoreMean)
+            sourceAsOf = try c.decodeIfPresent(String.self, forKey: .sourceAsOf)
+            rubricVersion = try c.decodeIfPresent(String.self, forKey: .rubricVersion)
+            judgeModel = try c.decodeIfPresent(String.self, forKey: .judgeModel)
+        }
     }
 
     public struct SkillQualityJudgeSummary: Decodable, Sendable, Equatable {
@@ -3398,8 +3421,8 @@
             let filteredTopEvo = (topLevelEvo ?? []).filter { !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
             versionEvolution = !filteredTopEvo.isEmpty ? filteredTopEvo : diag.versionEvolution
             skillRetro = (try? f.value("skill_retro", as: SkillRetroFourLayerSummary.self)) ?? diag.skillRetro
-            qualityBehavior = try f.value("quality_behavior")
-            qualityJudge = try f.value("quality_judge")
+            qualityBehavior = try? f.value("quality_behavior")
+            qualityJudge = try? f.value("quality_judge")
             errors = try f.value("errors") ?? []
         }
     }
