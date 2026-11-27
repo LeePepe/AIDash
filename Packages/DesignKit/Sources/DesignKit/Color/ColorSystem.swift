@@ -1,8 +1,11 @@
 import SwiftUI
 #if canImport(AppKit)
 import AppKit
-#elseif canImport(UIKit)
+#endif
+#if !canImport(AppKit)
+#if canImport(UIKit)
 import UIKit
+#endif
 #endif
 
 // ============================================================================
