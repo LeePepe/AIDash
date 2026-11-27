@@ -1452,17 +1452,47 @@ public enum LiveDashboardTelemetryReader {
             && ProcessInfo.processInfo.environment["XCTestBundlePath"] == nil
     }
 
+    private static var cachedTopicCatalogKey: String?
+    private static var cachedTopicCatalog: [DashboardTopic]?
+
     public static func loadTopicCatalog(
         homeURL: URL? = nil,
         dataReader: TopicMapDataReader? = nil
     ) -> [DashboardTopic] {
-        let read = dataReader ?? { try? Data(contentsOf: $0) }
         let home = homeURL ?? LiveMenuBarSystemStatusProvider.realUserHomeDirectoryURL()
         let candidates = [
             URL(fileURLWithPath: "/Users/tianpli/.agents/skills/personal-m2-assistant/references/m2-domain-map.json"),
             home.appendingPathComponent("Development/user-skills/skills/personal-m2-assistant/references/m2-domain-map.json"),
             URL(fileURLWithPath: "/Users/tianpli/Development/user-skills/skills/personal-m2-assistant/references/m2-domain-map.json")
         ]
+        if dataReader == nil {
+            let cacheKey = candidates.map(fileCacheSignature(for:)).joined(separator: "|")
+            if cachedTopicCatalogKey == cacheKey, let cached = cachedTopicCatalog {
+                return cached
+            }
+            let read: TopicMapDataReader = { try? Data(contentsOf: $0) }
+            let decoder = JSONDecoder()
+            for url in candidates {
+                guard let data = read(url), let envelope = try? decoder.decode(TopicMapEnvelope.self, from: data) else { continue }
+                let topics = envelope.groups.flatMap { group in
+                    group.topics.map { raw in
+                        DashboardTopic(
+                            id: raw.topicID, title: raw.title, group: raw.group ?? group.group,
+                            targetRepo: raw.targetRepo, cwd: raw.cwd, keywords: raw.keywords, aliases: raw.aliases
+                        )
+                    }
+                }
+                if !topics.isEmpty {
+                    cachedTopicCatalogKey = cacheKey
+                    cachedTopicCatalog = topics
+                    return topics
+                }
+            }
+            cachedTopicCatalogKey = cacheKey
+            cachedTopicCatalog = DashboardTopicCatalog.builtInTopics
+            return DashboardTopicCatalog.builtInTopics
+        }
+        let read = dataReader ?? { try? Data(contentsOf: $0) }
         let decoder = JSONDecoder()
         for url in candidates {
             guard let data = read(url), let envelope = try? decoder.decode(TopicMapEnvelope.self, from: data) else { continue }

@@ -83,8 +83,11 @@ public final class DashboardWorkspaceStore {
     public private(set) var scheduledPulseSnapshot: ScheduledPulseSnapshot = .defaultSnapshot()
     public private(set) var scheduledJobFrameworkSnapshot: ScheduledJobFrameworkSnapshot = .init(capturedAt: Date(), entries: [])
     public private(set) var modularDescriptors: [ModularDashboardDescriptor] = DashboardWorkspaceStore.defaultDescriptors
+    public private(set) var lastProviderRefreshAt: Date?
 
     private let statusProvider: any MenuBarSystemStatusProviding
+    private let nowProvider: () -> Date
+    private var minimumAutoRefreshInterval: TimeInterval = 5.0
 
     public static let defaultDescriptors: [ModularDashboardDescriptor] = [
         ModularDashboardDescriptor(
@@ -130,9 +133,11 @@ public final class DashboardWorkspaceStore {
         scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution,
         topicCatalog: [DashboardTopic]? = nil,
         sessionBindings: [String: DashboardM2SessionBinding]? = nil,
-        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
+        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil,
+        nowProvider: @escaping () -> Date = Date.init
     ) {
         self.statusProvider = statusProvider ?? LiveMenuBarSystemStatusProvider()
+        self.nowProvider = nowProvider
         self.scheduledJobExecution = scheduledJobExecution
         self.topicCatalog = topicCatalog ?? (LiveDashboardTelemetryReader.isLiveEnvironment ? LiveDashboardTelemetryReader.loadTopicCatalog() : DashboardTopicCatalog.builtInTopics)
         self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
@@ -153,9 +158,11 @@ public final class DashboardWorkspaceStore {
         scheduledJobExecution: @escaping ScheduledJobExecution = DashboardWorkspaceStore.productionScheduledJobExecution,
         topicCatalog: [DashboardTopic]? = nil,
         sessionBindings: [String: DashboardM2SessionBinding]? = nil,
-        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil
+        m2DispatchExecutor: ((String, String, String?) -> DashboardM2DispatchResult)? = nil,
+        nowProvider: @escaping () -> Date = Date.init
     ) {
         self.statusProvider = LiveMenuBarSystemStatusProvider(tokenDatabasePaths: CLITokenDatabasePaths())
+        self.nowProvider = nowProvider
         self.scheduledJobExecution = scheduledJobExecution
         self.topicCatalog = topicCatalog ?? DashboardTopicCatalog.builtInTopics
         self.topicSessionBindings = sessionBindings ?? Self.defaultTopicBindings(for: self.topicCatalog)
@@ -269,18 +276,36 @@ public final class DashboardWorkspaceStore {
         return win
     }
 
+    public func refreshFromProviderIfStale(minimumInterval: TimeInterval? = nil) {
+        let threshold = max(0, minimumInterval ?? minimumAutoRefreshInterval)
+        if let lastRefresh = lastProviderRefreshAt,
+           nowProvider().timeIntervalSince(lastRefresh) < threshold {
+            return
+        }
+        refreshFromProvider()
+    }
+
     public func refreshFromProvider() {
+        let now = nowProvider()
+        lastProviderRefreshAt = now
         let state = statusProvider.captureStatusState()
         topicCatalog = LiveDashboardTelemetryReader.loadTopicCatalog()
         let sessions = LiveDashboardTelemetryReader.loadHerdrM2SessionSnapshot()
         topicSessionBindings = sessions.bindings(for: topicCatalog)
         systemState = state
-        scheduledPulseSnapshot = LiveDashboardTelemetryReader.loadScheduledPulseSnapshot()
-        scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
-        selectedScheduledJobID = scheduledPulseSnapshot.jobs.first?.id
-        scheduledJobFrameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+        let frameworkSnapshot = LiveDashboardTelemetryReader.loadScheduledJobFrameworkSnapshot(
+            now: now,
             acknowledgedActionIDs: acknowledgedScheduledActionIDs
         )
+        scheduledJobFrameworkSnapshot = frameworkSnapshot
+        let statusFromFramework = frameworkSnapshot.entries.compactMap(\.launchdStatus)
+        if !statusFromFramework.isEmpty {
+            scheduledPulseSnapshot = ScheduledPulseSnapshot(capturedAt: now, jobs: statusFromFramework)
+        } else {
+            scheduledPulseSnapshot = LiveDashboardTelemetryReader.loadScheduledPulseSnapshot(now: now)
+        }
+        scheduledPulseHealthFilter = ScheduledPulseLogic.defaultHealthFilter(for: scheduledPulseSnapshot)
+        selectedScheduledJobID = scheduledPulseSnapshot.jobs.first?.id
         if case let .populated(snapshot) = state {
             applySnapshot(snapshot)
         }

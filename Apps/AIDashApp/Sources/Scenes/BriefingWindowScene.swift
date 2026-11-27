@@ -253,6 +253,7 @@ private struct StarFeedbackScope: View {
         Group {
             #if os(macOS)
             AIDashMacWorkspaceView(
+                telemetryCoordinator: telemetryCoordinator,
                 scheduledActionWriter: { action, responses in
                     writer.acknowledgeScheduledJobAction(action: action, responses: responses)
                 },

@@ -178,6 +178,14 @@ struct BriefingViewTests {
         #expect(source.contains("lineLimit(1)"))
     }
 
+    @Test("scrollBody uses LazyVStack for live container list while preserving explicit snapshot state rendering")
+    func scrollBodyUsesLazyContainerList() throws {
+        let source = try Self.briefingViewSource()
+        #expect(source.contains("LazyVStack(alignment: .leading, spacing: AIDashSpacing.containerVertical)"))
+        #expect(source.contains("pageContent(proxy: proxy, usesLazyContainers: true)"))
+        #expect(source.contains("pageContent(usesLazyContainers: false)"))
+    }
+
     @Test("simplified masthead omits telemetry and redundant date-status pills")
     func mastheadIsCalm() throws {
         let source = try Self.briefingViewSource()
