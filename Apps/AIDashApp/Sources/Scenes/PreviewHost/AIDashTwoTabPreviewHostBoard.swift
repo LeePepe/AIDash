@@ -1,4 +1,5 @@
 #if os(macOS)
+import DesignKit
 import SwiftUI
 
 @MainActor
@@ -114,8 +115,8 @@ public struct AIDashTwoTabPreviewHostBoard: View {
     @State private var activeTab: DashboardWorkspaceSection = .overview
     @State private var expandAll = false
     @State private var speed: PreviewSpeedMultiplier = .normal
-    @State private var darkAppearance = true
     @State private var receiptWriter: PreviewSelectionReceiptWriter
+    @Environment(\.theme) private var theme
     private let data: AIDashPreviewSampleData
 
     public init(data: AIDashPreviewSampleData? = nil, receiptPath: URL? = nil) {
@@ -152,9 +153,8 @@ public struct AIDashTwoTabPreviewHostBoard: View {
                 }
                 .padding(18)
             }
-            .background(Color(nsColor: .underPageBackgroundColor))
+            .background(theme.neutrals.bg)
         }
-        .preferredColorScheme(darkAppearance ? .dark : .light)
         .frame(minWidth: 1180, minHeight: 760)
     }
 
@@ -180,11 +180,6 @@ public struct AIDashTwoTabPreviewHostBoard: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 210)
-                Button { darkAppearance.toggle() } label: {
-                    Label(darkAppearance ? "深色" : "浅色", systemImage: darkAppearance ? "moon.fill" : "sun.max.fill")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
             HStack(spacing: 8) {
                 tabButton(
@@ -211,7 +206,7 @@ public struct AIDashTwoTabPreviewHostBoard: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(theme.neutrals.card)
     }
 
     private func tabButton(_ tab: DashboardWorkspaceSection, title: String, count: Int) -> some View {
@@ -254,9 +249,8 @@ public struct AIDashTwoTabPreviewHostBoard: View {
             sectionView(for: descriptor)
         }
         .padding(12)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.secondary.opacity(0.2)))
-        .shadow(color: .black.opacity(darkAppearance ? 0.18 : 0.06), radius: 8, y: 3)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1))
     }
 
     @ViewBuilder

@@ -477,19 +477,17 @@ struct DashboardWorkspaceTests {
                 let standalone = view.toolbarHeaderComparisonPreview(snapshot: state.snapshot)
                     .padding(12)
                     .environment(\.colorScheme, scheme)
-                    .environment(\.theme, Theme(isDark: scheme == .dark))
                 let platters = HStack(spacing: 12) {
                     view.unifiedDateNavigationToolbarCluster
                         .padding(12)
-                        .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
+                        .background(Theme().neutrals.card.opacity(0.7), in: Capsule())
                     view.rightToolbarCluster(snapshot: state.snapshot)
                         .padding(12)
-                        .background(Color(nsColor: .windowBackgroundColor).opacity(0.7), in: Capsule())
+                        .background(Theme().neutrals.card.opacity(0.7), in: Capsule())
                 }
                 .padding(12)
-                .background(Color(nsColor: .underPageBackgroundColor))
+                .background(Theme().neutrals.bg)
                 .environment(\.colorScheme, scheme)
-                .environment(\.theme, Theme(isDark: scheme == .dark))
                 for (kind, renderable) in [("standalone", AnyView(standalone)), ("two-platter-simulation", AnyView(platters))] {
                     let bitmap = try toolbarHeaderBitmap(for: renderable, scheme: scheme)
                     let png = try #require(bitmap.representation(using: .png, properties: [:]))
@@ -1110,13 +1108,18 @@ struct DashboardWorkspaceTests {
         ]
         for (name, view) in views {
             for scheme in [ColorScheme.dark, ColorScheme.light] {
-                let renderer = ImageRenderer(content: view
-                    .frame(width: 760, alignment: .topLeading)
-                    .padding(16)
-                    .background(Color(nsColor: .windowBackgroundColor))
-                    .environment(\.colorScheme, scheme))
-                renderer.scale = 2
-                let image = try #require(renderer.nsImage)
+                let appearance = try #require(NSAppearance(named: scheme == .dark ? .darkAqua : .aqua))
+                var renderedImage: NSImage?
+                appearance.performAsCurrentDrawingAppearance {
+                    let renderer = ImageRenderer(content: view
+                        .frame(width: 760, alignment: .topLeading)
+                        .padding(16)
+                        .background(Theme().neutrals.bg)
+                        .environment(\.colorScheme, scheme))
+                    renderer.scale = 2
+                    renderedImage = renderer.nsImage
+                }
+                let image = try #require(renderedImage)
                 let tiff = try #require(image.tiffRepresentation)
                 let png = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
                 let suffix = scheme == .dark ? "dark" : "light"
@@ -1617,9 +1620,8 @@ struct DashboardWorkspaceTests {
                 let card = AgentEfficiencyChartsCardView(summary: stateSummary)
                     .frame(width: 1080)
                     .padding(16)
-                    .background(Color(nsColor: .underPageBackgroundColor))
+                    .background(Theme().neutrals.bg)
                     .environment(\.colorScheme, scheme)
-                    .environment(\.theme, Theme(isDark: scheme == .dark))
                 let bmp = try toolbarHeaderBitmap(for: card, scheme: scheme)
                 let png = try #require(bmp.representation(using: .png, properties: [:]))
                 #expect(!png.isEmpty)
@@ -2158,9 +2160,8 @@ struct DashboardWorkspaceTests {
         )
         .frame(width: 1120)
         .padding(16)
-        .background(Color(nsColor: .underPageBackgroundColor))
+        .background(Theme().neutrals.bg)
         .environment(\.colorScheme, .dark)
-        .environment(\.theme, Theme(isDark: true))
         .environment(\.dashboardGeometryRecorder, recorder)
         .coordinateSpace(name: "tk3-geometry")
 
@@ -2183,7 +2184,8 @@ struct DashboardWorkspaceTests {
         for lens in SkillsRoiLens.allCases {
             let lensRecorder = DashboardGeometryRecorder()
             let view = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: lens)
-                .frame(width: 1120).environment(\.theme, Theme(isDark: true))
+                .frame(width: 1120)
+                .environment(\.colorScheme, .dark)
                 .environment(\.dashboardGeometryRecorder, lensRecorder)
             _ = try toolbarHeaderBitmap(for: view, scheme: .dark)
             let lensIDs = Set(lensRecorder.samples.map(\.id))
@@ -2237,9 +2239,8 @@ struct DashboardWorkspaceTests {
                     )
                     .frame(width: 1120)
                     .padding(16)
-                    .background(Color(nsColor: .underPageBackgroundColor))
+                    .background(Theme().neutrals.bg)
                     .environment(\.colorScheme, scheme)
-                    .environment(\.theme, Theme(isDark: scheme == .dark))
                     let stateBmp = try toolbarHeaderBitmap(for: v, scheme: scheme)
                     if let png = stateBmp.representation(using: .png, properties: [:]) {
                         try png.write(to: shotDir.appendingPathComponent("skills-workbench-v2-\(stateName)-\(appearance).png"))
@@ -2721,9 +2722,8 @@ struct DashboardWorkspaceTests {
                 let card = AgentEfficiencyChartsCardView(summary: stateSummary)
                     .frame(width: 1080)
                     .padding(16)
-                    .background(Color(nsColor: .underPageBackgroundColor))
+                    .background(Theme().neutrals.bg)
                     .environment(\.colorScheme, scheme)
-                    .environment(\.theme, Theme(isDark: scheme == .dark))
                 let bmp = try toolbarHeaderBitmap(for: card, scheme: scheme)
                 let png = try #require(bmp.representation(using: .png, properties: [:]))
                 #expect(!png.isEmpty)
@@ -3061,7 +3061,10 @@ struct DashboardWorkspaceTests {
             ("empty", emptySum, false),
             ("degraded", degradedSum, false),
         ]
+        var luminanceByState: [String: (light: Double, dark: Double)] = [:]
         for (stateName, stateSum, loadingFlag) in states {
+            var stateLightLum = 0.0
+            var stateDarkLum = 0.0
             for scheme in [ColorScheme.light, ColorScheme.dark] {
                 let appearance = scheme == .dark ? "dark" : "light"
                 let view = GoalWorkStreamWorkbenchView(
@@ -3070,21 +3073,30 @@ struct DashboardWorkspaceTests {
                     onRefresh: {}
                 )
                 .padding(20)
-                .frame(width: 1120, alignment: .topLeading)
-                .background(Color(nsColor: .underPageBackgroundColor))
+                .frame(width: 1280, alignment: .topLeading)
+                .background(Theme().neutrals.bg)
                 .environment(\.colorScheme, scheme)
-                .environment(\.theme, Theme(isDark: scheme == .dark))
-                let renderer = ImageRenderer(content: view)
-                renderer.scale = 2
-                let nsImg = try #require(renderer.nsImage)
-                let tiff = try #require(nsImg.tiffRepresentation)
-                let bmp = try #require(NSBitmapImageRep(data: tiff))
+                let bmp = try toolbarHeaderBitmap(for: view, scheme: scheme)
                 let png = try #require(bmp.representation(using: .png, properties: [:]))
                 #expect(!png.isEmpty)
                 #expect(bmp.pixelsWide >= 1280)
                 #expect(bmp.pixelsHigh >= 200)
+                #expect(!containsUnsupportedViewPlaceholder(bmp), "Unsupported-view yellow placeholder in goal-work-stream-\(stateName)-\(appearance)")
+                if let bgSample = bmp.colorAt(x: 8, y: 8)?.usingColorSpace(.sRGB) {
+                    let lum = 0.2126 * Double(bgSample.redComponent)
+                        + 0.7152 * Double(bgSample.greenComponent)
+                        + 0.0722 * Double(bgSample.blueComponent)
+                    if scheme == .dark {
+                        stateDarkLum = lum
+                    } else {
+                        stateLightLum = lum
+                    }
+                }
                 try png.write(to: outDir.appendingPathComponent("goal-work-stream-\(stateName)-\(appearance).png"))
             }
+            luminanceByState[stateName] = (light: stateLightLum, dark: stateDarkLum)
+            #expect(stateLightLum > 0.75, "Expected bright OS .aqua canvas for \(stateName), got \(stateLightLum)")
+            #expect(stateDarkLum < 0.15, "Expected dark OS .darkAqua canvas for \(stateName) without manual Theme(isDark:), got \(stateDarkLum)")
         }
     }
 }

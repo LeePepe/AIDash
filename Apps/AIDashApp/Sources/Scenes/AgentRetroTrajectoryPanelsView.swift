@@ -113,7 +113,7 @@ public struct AgentRetroTrajectoryPanelsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .accessibilityIdentifier("dashboard.agentRetroEmptyCard")
         .accessibilityElement(children: .combine)
@@ -163,7 +163,7 @@ public struct AgentRetroTrajectoryPanelsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -271,7 +271,7 @@ public struct AgentRetroSixLayerPanelView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .accessibilityIdentifier("dashboard.agentRetroSixLayerPanel")
     }
@@ -482,7 +482,7 @@ public struct AgentHorizonWastePanelView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .accessibilityIdentifier("dashboard.agentHorizonWastePanel")
     }

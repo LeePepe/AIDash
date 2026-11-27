@@ -2,6 +2,7 @@
 // swiftlint:disable file_length
 import AppKit
 import Charts
+import DesignKit
 import SwiftUI
 import AIDashUI
 
@@ -12,8 +13,8 @@ public struct SolidModularCardContainer<HeaderAccessory: View, Content: View>: V
     private let accessory: HeaderAccessory
     private let content: Content
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.theme) private var theme
 
     public init(
         title: String, subtitle: String? = nil, symbolName: String,
@@ -41,11 +42,11 @@ public struct SolidModularCardContainer<HeaderAccessory: View, Content: View>: V
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(reduceTransparency ? Color(nsColor: .windowBackgroundColor) : Color(nsColor: .controlBackgroundColor))
+                .fill(theme.neutrals.card)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(contrast == .increased ? Color.primary.opacity(0.28) : Color(nsColor: .separatorColor), lineWidth: contrast == .increased ? 1.5 : 1)
+                .stroke(contrast == .increased ? Color.primary.opacity(0.28) : theme.neutrals.border, lineWidth: contrast == .increased ? 1.5 : 1)
         }
     }
 }
@@ -69,6 +70,7 @@ public enum DashboardSemanticColorPalette {
 
 public struct SystemTelemetryStripView: View {
     public let snapshot: MenuBarSystemSnapshot
+    @Environment(\.theme) private var theme
 
     public init(snapshot: MenuBarSystemSnapshot) {
         self.snapshot = snapshot
@@ -157,7 +159,7 @@ public struct SystemTelemetryStripView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.neutrals.inner))
         .accessibilityElement(children: .combine)
     }
 }
@@ -165,6 +167,7 @@ public struct SystemTelemetryStripView: View {
 public struct KPISummaryCardView: View {
     public let metrics: [KPIMetricItem]
     public var onSelectMetric: ((String) -> Void)?
+    @Environment(\.theme) private var theme
 
     public init(metrics: [KPIMetricItem], onSelectMetric: ((String) -> Void)? = nil) {
         self.metrics = metrics
@@ -205,7 +208,7 @@ public struct KPISummaryCardView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.neutrals.inner))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -312,6 +315,7 @@ private struct TrendChartInteractiveCanvas: View {
     let selectedCategory: String?
     let timeGranularity: DashboardChartTimeGranularity
     @State private var hoveredBucketLabel: String?
+    @Environment(\.theme) private var theme
 
     var body: some View {
         let hoverSummary = hoveredBucketLabel.flatMap {
@@ -354,7 +358,7 @@ private struct TrendChartInteractiveCanvas: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 46, maxHeight: 46, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(theme.neutrals.inner))
     }
 
     private var periodCLISummaryText: String {
@@ -445,6 +449,7 @@ public struct CLICostQuotaCardView: View {
     public let periodTotalUSD: Double
     public var selectedCategory: String?
     public var onSelectCategory: ((String) -> Void)?
+    @Environment(\.theme) private var theme
 
     public init(
         entries: [CLICostQuotaEntry], todayTotalUSD: Double, periodTotalUSD: Double,
@@ -585,7 +590,7 @@ public struct CLICostQuotaCardView: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.neutrals.inner))
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(!entry.authState.isAuthenticated ? tint.opacity(0.45) : (isRecommended ? Color.accentColor.opacity(0.45) : Color.clear), lineWidth: 1.5)
@@ -652,7 +657,7 @@ public struct CLICostQuotaCardView: View {
                 }
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.neutrals.inner))
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
@@ -685,6 +690,7 @@ public struct AgentEfficiencyChartsCardView: View {
     public let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     @State private var workloadMetric: AgentEfficiencyWorkloadMetric = .runs
     @Environment(\.locale) private var locale
+    @Environment(\.theme) private var theme
 
     public init(summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?) {
         self.summary = summary
@@ -820,7 +826,7 @@ public struct AgentEfficiencyChartsCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
     }
 
@@ -940,7 +946,7 @@ public struct AgentEfficiencyChartsCardView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
     }
 
@@ -1004,7 +1010,7 @@ public struct AgentEfficiencyChartsCardView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
     }
 
@@ -1066,7 +1072,7 @@ public struct AgentEfficiencyChartsCardView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
     }
 
@@ -1139,7 +1145,7 @@ public struct AgentEfficiencyChartsCardView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
     }
 
@@ -1212,7 +1218,7 @@ public struct AgentEfficiencyChartsCardView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
     }
 

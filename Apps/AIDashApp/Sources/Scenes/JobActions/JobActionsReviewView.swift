@@ -181,7 +181,6 @@ final class JobActionsNativePresenter: JobActionsReviewPresenting {
         let view = JobActionsReviewView(review: review, confirm: confirm, cancel: { [weak self] in
             self?.close(requestID: requestID)
         })
-        .designTheme(seed: .lime, neutral: .slate)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 600),
             styleMask: [.titled, .closable, .resizable],

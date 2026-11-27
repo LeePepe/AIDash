@@ -273,7 +273,7 @@ public struct ActionItemsCardView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: Capsule())
+        .background(theme.neutrals.inner, in: Capsule())
     }
 
     private var kanbanBoardItems: [DashboardActionItem] {
@@ -359,7 +359,7 @@ public struct ActionItemsCardView: View {
         }
         .padding(10)
         .frame(minWidth: 300, idealWidth: 340, maxWidth: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func kanbanColumn(_ column: KanbanColumn) -> some View {
@@ -404,7 +404,7 @@ public struct ActionItemsCardView: View {
         }
         .padding(10)
         .frame(minWidth: 260, idealWidth: 290, maxWidth: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // swiftlint:disable:next function_body_length
@@ -503,10 +503,10 @@ public struct ActionItemsCardView: View {
             kanbanActionFooter(item, isDone: isDone)
         }
         .padding(10)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 1)
+                .stroke(theme.neutrals.border, lineWidth: 1)
         }
     }
 
@@ -716,7 +716,7 @@ public struct ActionItemsCardView: View {
                     Image(systemName: domain.symbolName)
                     Text(domain.title).font(.caption.weight(.semibold))
                     Text("\(items.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+                    Rectangle().fill(theme.neutrals.border).frame(height: 1)
                     Image(systemName: collapsedDomains.contains(domain) ? "chevron.down" : "chevron.up").font(.caption2)
                 }
                 .frame(minHeight: 28)
@@ -1042,7 +1042,7 @@ public struct ActionItemsCardView: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor)))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.neutrals.inner))
         .captureDashboardGeometry(id: "action-\(item.id)", role: "actionRow")
     }
 
@@ -1090,7 +1090,7 @@ public struct ActionItemsCardView: View {
         }
         .font(.caption)
         .padding(8)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     @ViewBuilder
@@ -1431,6 +1431,7 @@ public struct ActionItemsCardView: View {
 
 public struct RankingTableCardView: View {
     @Bindable public var store: DashboardWorkspaceStore
+    @Environment(\.theme) private var theme
 
     public init(store: DashboardWorkspaceStore) {
         self.store = store
@@ -1507,7 +1508,7 @@ public struct RankingTableCardView: View {
                     .padding(10)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(nsColor: .windowBackgroundColor))
+                            .fill(theme.neutrals.inner)
                     )
                 }
             }
@@ -1522,6 +1523,7 @@ public struct AIDashMacWorkspaceView: View {
     @State private var showPreviewHostGallery = false
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.theme) private var theme
 
     public init(
         store: DashboardWorkspaceStore? = nil,
@@ -1551,7 +1553,7 @@ public struct AIDashMacWorkspaceView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .underPageBackgroundColor), ignoresSafeAreaEdges: .all)
+            .background(theme.neutrals.bg, ignoresSafeAreaEdges: .all)
             .captureDashboardGeometry(id: "workspace-detail-scroll", role: "workspaceDetailScroll")
             .navigationSplitViewColumnWidth(min: 320, ideal: 1980, max: .infinity)
             .navigationTitle(store.selectedSection.title)
@@ -1738,7 +1740,7 @@ public struct AIDashMacWorkspaceView: View {
                         .background(
                             store.selectedSection == .settings
                                 ? Color.accentColor.opacity(0.18)
-                                : Color(nsColor: .windowBackgroundColor).opacity(0.75),
+                                : theme.neutrals.inner,
                             in: Capsule()
                         )
                         .foregroundStyle(store.selectedSection == .settings ? Color.accentColor : Color.primary)

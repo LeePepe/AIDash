@@ -100,7 +100,7 @@ private struct PreviewGoalWorkStreamVariantCard: View {
     let speed: PreviewSpeedMultiplier
     @State private var drawerExpanded = false
     @State private var selectedGoalIndex = 0
-    @State private var activeFilterIndex = 0
+    @State private var activeFilter: GoalWorkStreamFilter = .all
     @Environment(\.theme) private var theme
 
     private var expanded: Bool { globalExpandAll || drawerExpanded }
@@ -143,8 +143,8 @@ private struct PreviewGoalWorkStreamVariantCard: View {
             .animation(speed.spring(), value: expanded)
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.secondary.opacity(0.18)))
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(theme.neutrals.border.opacity(0.6), lineWidth: 1))
     }
 
     @ViewBuilder
@@ -162,17 +162,9 @@ private struct PreviewGoalWorkStreamVariantCard: View {
     }
 
     private var compactPrimaryRowsStage: some View {
-        let filterTitles = ["全部 Goal", "在跑与阻塞", "待 AI 提效", "已交付"]
-        return VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
-                ForEach(filterTitles.indices, id: \.self) { idx in
-                    Button(filterTitles[idx]) {
-                        activeFilterIndex = idx
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(activeFilterIndex == idx ? theme.primary.primary : nil)
-                    .controlSize(.small)
-                }
+                GoalFilterSegmentedBar(selection: $activeFilter, variant: .pillCapsule)
                 Spacer()
                 PreviewPill("4 段动作占比", tint: theme.primary.primary)
             }
@@ -298,45 +290,48 @@ private struct PreviewGoalWorkStreamVariantCard: View {
 
     private var bentoGoalSwimlanesStage: some View {
         let lanes: [(String, [PreviewGoalWorkMetric], Color)] = [
-            ("在跑与审查", goals.filter { $0.status == "active" || $0.status == "in_review" }, theme.primary.primary),
-            ("待 AI 提效", goals.filter { $0.reworkPct > 0 || $0.status == "daily" }, theme.warning),
-            ("已交付闭环", goals.filter { $0.status == "done" || $0.prNumber > 0 }, theme.success),
+            ("在跑与审查", filteredGoals.filter { $0.status == "active" || $0.status == "in_review" }, theme.primary.primary),
+            ("待 AI 提效", filteredGoals.filter { $0.reworkPct > 0 || $0.status == "daily" }, theme.warning),
+            ("已交付闭环", filteredGoals.filter { $0.status == "done" || $0.prNumber > 0 }, theme.success),
         ]
-        return HStack(alignment: .top, spacing: 8) {
-            ForEach(lanes, id: \.0) { laneTitle, items, tint in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(laneTitle)
-                            .font(.caption.weight(.bold))
-                        Spacer()
-                        PreviewPill("\(items.count)", tint: tint)
-                    }
-                    ForEach(items.prefix(2)) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title)
-                                .font(.caption2.weight(.semibold))
-                                .lineLimit(1)
-                            WorkStatusActionSplitBar(
-                                split: WorkStatusActionSplit(
-                                    searchReadCalls: Int(item.searchPct),
-                                    codeEditCalls: Int(item.editPct),
-                                    verifyScriptCalls: Int(item.verifyPct),
-                                    spinReworkCalls: Int(item.reworkPct)
-                                ),
-                                height: 6
-                            )
-                            Text("\(Int(item.durationMinutes))m · \(item.filesChanged) 文件")
-                                .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: 8) {
+            GoalFilterSegmentedBar(selection: $activeFilter, variant: .underlinedTabStrip)
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(lanes, id: \.0) { laneTitle, items, tint in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(laneTitle)
+                                .font(.caption.weight(.bold))
+                            Spacer()
+                            PreviewPill("\(items.count)", tint: tint)
                         }
-                        .padding(7)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        ForEach(items.prefix(2)) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.title)
+                                    .font(.caption2.weight(.semibold))
+                                    .lineLimit(1)
+                                WorkStatusActionSplitBar(
+                                    split: WorkStatusActionSplit(
+                                        searchReadCalls: Int(item.searchPct),
+                                        codeEditCalls: Int(item.editPct),
+                                        verifyScriptCalls: Int(item.verifyPct),
+                                        spinReworkCalls: Int(item.reworkPct)
+                                    ),
+                                    height: 6
+                                )
+                                Text("\(Int(item.durationMinutes))m · \(item.filesChanged) 文件")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(7)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
                     }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
         }
     }
@@ -345,14 +340,12 @@ private struct PreviewGoalWorkStreamVariantCard: View {
         let reworkDropSeries: [Double] = [14.2, 12.8, 10.5, 8.9, 7.1, 5.4, 4.0]
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("14 天动作光谱矩阵（读 / 改 / 测 / 重试）")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                GoalFilterSegmentedBar(selection: $activeFilter, variant: .underlinedTabStrip)
                 Spacer()
                 PreviewPill("重试占比 14.2% → 4.0% ▼", tint: theme.success)
             }
             PreviewSparkline(values: reworkDropSeries, tint: theme.success, height: 26)
-            ForEach(goals.prefix(3)) { goal in
+            ForEach(filteredGoals.prefix(3)) { goal in
                 HStack(spacing: 8) {
                     Text(goal.repoName)
                         .font(.caption2.weight(.semibold))
@@ -376,11 +369,11 @@ private struct PreviewGoalWorkStreamVariantCard: View {
     }
 
     private var filteredGoals: [PreviewGoalWorkMetric] {
-        switch activeFilterIndex {
-        case 1: return goals.filter { $0.status == "active" || $0.status == "in_review" }
-        case 2: return goals.filter { $0.reworkPct > 0 }
-        case 3: return goals.filter { $0.prNumber > 0 }
-        default: return goals
+        switch activeFilter {
+        case .activeAndBlocked: return goals.filter { $0.status == "active" || $0.status == "in_review" }
+        case .needsOptimization: return goals.filter { $0.reworkPct > 0 }
+        case .delivered: return goals.filter { $0.prNumber > 0 }
+        case .all: return goals
         }
     }
 
