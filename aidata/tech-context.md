@@ -172,6 +172,23 @@ CST queries (`retro/agent_retro_six_layer` and `retro/agent_horizon_waste`),
 and L5 emits plain-language `agent_retro` fields in `agent-efficiency.json` plus
 `agent_retro_watermarks` enrichment in `skills-roi.json` (`docs/metrics/agent-retro.md`).
 
+## Goal-aggregated & session work summary pipeline (`work-status.json`)
+
+`adapters/session_work.py` is an opt-in, privacy-safe L1/L2 projection (not in
+`SOURCES` or `MERGE_SOURCES`) that reads `~/.copilot/session-store.db` in
+read-only mode (`mode=ro&immutable=1`) plus GTT handoff/worktree linkage and
+materializes `clean/session_work.db` (`session_work` table) at the Session Work
+Receipt grain—persisting 8-character short session IDs, sanitized repo/goal/branch
+slugs, scrubbed 1-line summaries (`<=80` chars), closed role enums, 4-segment
+action counts (`search_read`, `code_edit`, `verify_script`, `spin_rework`), and
+concrete outputs without raw prompts, transcripts, or local paths. L3 merges
+`clean/session_work.db` into `fact_session_work_summary` (with `STORED` `+8 hours`
+`cst_day`). L4 serves `retro/goal_session_work_stream` (`-- aidata-tier: explore`)
+over a rolling 14-day CST window, and L5 `L5_apps/digest/work_status_snapshot.py`
+emits `work-status.json` (`aidash-work-status/v1`), grouping standalone sessions
+under `unassigned-daily` and exposing plain-language optimization signals
+(`docs/metrics/work-status-workbench.md`).
+
 ## 与 local_git 源的自指
 
 `config.LOCAL_GIT_SCAN_ROOTS` 扫 `~/Development` 统计我的提交产出。aidata 并入
