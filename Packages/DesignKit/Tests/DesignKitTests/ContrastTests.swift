@@ -172,10 +172,14 @@ struct StatusPillContrastTests {
     func primaryToneIsReadableForAllSeeds() {
         for seed in Seed.allCases {
             for ground in Ground.every {
-                let theme = Theme(seed: seed, neutral: ground.neutral, isDark: ground.isDark)
+                let palette = makePrimaryPalette(
+                    seed: seed.color,
+                    isDark: ground.isDark,
+                    darkAnchor: seed.darkAnchor
+                )
                 for (name, bg) in ground.all {
-                    let r = pillRatio(text: theme.primary.onPrimarySubtle,
-                                      fill: theme.primary.primary, over: bg)
+                    let r = pillRatio(text: palette.onPrimarySubtle,
+                                      fill: palette.primary, over: bg)
                     #expect(r >= WCAG.smallText,
                             "\(seed.rawValue) \(ground.label) primary pill on \(name) = \(r), needs >= \(WCAG.smallText)")
                 }

@@ -25,24 +25,23 @@ owns: [Seed, Neutral, PrimaryPalette, Neutrals, Semantic, Classification, TextRo
 
 ## 职责
 
-- **seed 色彩系统**:`makePrimaryPalette(seed:isDark:darkAnchor:)` 从单个 seed 派生完整
-  primary token 集;`chartPalette` 派生 8 档图表色;`Semantic` 固定 success/warning/danger;
-  `Neutral` 提供 slate / neutral 两套中性色。**同一套色彩数学与 web 模板
-  (`color-system.ts`) 逐字一致。**
+- **seed 色彩系统**:`makePrimaryPalette(seed:isDark:darkAnchor:)` 与 `makeDynamicPrimaryPalette(seed:darkAnchor:)` 从单个 seed 派生完整
+  primary token 集;`chartPalette` / `dynamicChartPalette` 派生 8 档图表色;`Semantic` 固定 success/warning/danger;
+  `Neutral` 提供 slate / neutral 两套中性色。所有令牌均通过 `NSColor(name: nil) { appearance in ... }` / `UIColor { traits in ... }` 在绘制期跟随系统外观动态解析。
 - **组件词汇**:`Card` / `CardInner` / `Metric` / `Sparkline` / `RingGauge` / `StatusPill` /
-  `SectionHeader`——消费上面的 token,不含业务逻辑。
+  `SectionHeader`——直接消费 `Theme.system` 动态令牌,不含业务逻辑。
 
 ## Dark anchor(单 seed 的深色锚点,非第二套调色板)
 
 通用深色规则 `b + 0.06` 假设「亮色 seed 已在色相/饱和度上接近深色目标,只需从近黑提亮」。
-五个 Radix/Apple seed 成立;`lime` **不成立**——亮值 `#5A8A00` 为在白底存活被刻意压深
+五个标准 seed 成立;`lime` **不成立**——亮值 `#5A8A00` 为在白底存活被刻意压深
 (h 80.9°, s 1.00, b 0.54),而宪法 1.7.0 / `design/north-star.md` §10 规定的签名色是
 `#C6F04A`(h 75.2°, s 0.69, b 0.94):**色相要降约 6°、饱和度要降约 0.31,任何提亮都到不了**。
 旧式派生得 `#679908`(卡片底对比 4.99:1,签名色为 12.97:1)——即 MY-1399 的 P0。
 
 因此 `Seed.darkAnchorHex` 只为**这一个 seed** 固定深色 primary;整条深色 ramp 仍由该锚点
 用同一套 HSB 关系派生,`Semantic` / `Classification` 不动。**这是「一个 seed 系统」的锚点
-校准,不是第二套调色板**;其余 seed 返回 `nil`,走与 web 逐字一致的派生,并由
+校准,不是第二套调色板**;其余 seed 返回 `nil`,走标准 HSB 派生,并由
 `ColorSystemTests` 的黄金值锁死。
 
 ## 可访问性角色 token(text role + on-subtle)
@@ -75,31 +74,23 @@ DesignKit 管视觉。AIDashUI 同时依赖二者。
 - **DesignKit 拥有颜色**(规范源):seed 系统(`makePrimaryPalette`)、`Semantic`
   (success/warning/danger)、`Classification`(6 个 per-CardType 分类 tint)、`chartPalette`。
   raw hex **只允许存在于此层的 token 源**。
-- **AIDashUI 消费 DesignKit 颜色**:视图经 `@Environment(\.theme)` 读 `Theme`——
-  `CardTypeBadge` 用 `theme.classificationTint(...)`;stripe/trend/sparkline/priority 用
-  `theme.success/.warning/.danger/.primary.primary`。AIDashUI **不内联任何颜色字面量**
+- **AIDashUI 消费 DesignKit 颜色**:视图直接读取 `Theme.system`——
+  `CardTypeBadge` 用 `Theme.system.classificationTint(...)`;stripe/trend/sparkline/priority 用
+  `Theme.system.success/.warning/.danger/.primary.primary`。AIDashUI **不内联任何颜色字面量**
   (系统色 `.blue/.green` 或 hex 都不行),仅保留文本语义角色 `.primary/.secondary/.tertiary`。
 - **AIDashUI 拥有卡片域几何/排版语义**:`AIDashTypography`/`AIDashSize`/`AIDashChrome`——
   绑定 constitution 的 type/size/style 三正交维度,是 briefing 专用,留在 AIDashUI。
-- **运行时动态系统外观**:`ThemeKey.defaultValue` 默认构造 OS 动态 `Theme(seed: .appleBlue, neutral: .slate)`,
+- **运行时动态系统外观**:`Theme.system` 是全局唯一系统级动态主题(`Seed.appleBlue` + `Neutral.slate`),
   底层通过 `NSColor(name: nil) { appearance in ... }` / `UIColor { traits in ... }` 在绘制期直接读取系统外观
-  (`NSAppearance` `.aqua`/`.darkAqua` 与 `UITraitCollection.userInterfaceStyle`),无需 `.designTheme(...)`
-  修饰符或手动注入 `isDark` 环境值。`Theme(seed:neutral:isDark:)` 仅保留供确定性单元测试校验色值数学。
+  (`NSAppearance` `.aqua`/`.darkAqua` 与 `UITraitCollection.userInterfaceStyle`),零平行环境键或手动切换状态。
 - **宪法依据**:constitution 1.6.0 §Design System & Tokens + Quality Bar §I P1.4——
   颜色 MUST 来自 package token 源,视图 MUST NOT 内联颜色。分类 tint 用固定 light/dark
   hex 对(非 seed 派生),保证 6 色恒可区分且保留深色模式。
 
-## 分发模型(跨 repo 同一设计语言)
+## 黄金值防漂移约束
 
-这套设计语言来自 `design-system` skill,**分发靠"拷贝 + 校准常量",不靠"共享包"**:
-
-- skill 的 `templates/swiftui/` 被**逐字拷进**本 repo 成为 `DesignKit/`(commit `7cd6a9e`);
-  web 项目拷 `templates/shared/`。参考实现(如 nocoo/basalt)同理——是 reference 不是库。
-- **统一性的真正锚点是"seed 色彩数学逐字一致"**:`makePrimaryPalette`(SwiftUI)与
-  `color-system.ts`(web)镜像同一算法与校准常量。语言的一致由"规则+常量相同"保证,
-  不由"import 同一 artifact"保证。
-- **已知弱点 = 漂移**:各 repo 的拷贝会各自演化。本层已给 seed 数学 + 分类 tint 加了
-  **黄金值测试**(`ColorSystemTests`),拷贝一旦偏离固定 hex 即被该层 test / CI 抓。
+色彩系统的确定性锚点是 **HSB 派生数学 + 校准常量**:`makePrimaryPalette`、语义色与分类 tint
+均由 `ColorSystemTests` 的黄金值测试与 `ContrastTests` 的 WCAG 实测比值锁死,一旦偏离校准常量即被该层单测与 CI 拦截。
 
 
 ## 约束(red_lines 详见 frontmatter)

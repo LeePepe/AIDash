@@ -1,14 +1,14 @@
 import SwiftUI
 
 // ============================================================================
-//  Component vocabulary — SAME names/roles/rules as the web components.
+//  Component vocabulary — shared DesignKit primitives consuming Theme.system.
 //  Elevation = luminance tiers (bg < card < inner) + 1px border, no shadows.
 // ============================================================================
 
 // MARK: - Card (L1) + CardInner (L2)
 
 public struct Card<Content: View>: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @ViewBuilder private let content: () -> Content
     public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
 
@@ -26,7 +26,7 @@ public struct Card<Content: View>: View {
 }
 
 public struct CardInner<Content: View>: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @ViewBuilder private let content: () -> Content
     public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
 
@@ -46,7 +46,7 @@ public struct CardInner<Content: View>: View {
 // MARK: - Metric — tabular value + label + optional delta
 
 public struct Metric: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     private let value: String
     private let label: String?
     private let delta: (value: String, positive: Bool)?
@@ -179,7 +179,7 @@ public struct Sparkbars: View {
 public struct SegmentedGauge: View {
     static let defaultHeight: CGFloat = 30
 
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     private let value: Double
     private let segments: Int
     private let color: Color?
@@ -219,7 +219,7 @@ public struct SegmentedGauge: View {
 // MARK: - RingGauge — ratio as an arc
 
 public struct RingGauge: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     private let value: Double
     private let size: CGFloat
     private let stroke: CGFloat
@@ -255,7 +255,7 @@ public struct RingGauge: View {
 public enum PillTone { case primary, success, warning, danger, neutral }
 
 public struct StatusPill: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     private let text: String
     private let tone: PillTone
     public init(_ text: String, tone: PillTone = .neutral) {
@@ -311,7 +311,7 @@ public struct StatusPill: View {
 // MARK: - SectionHeader
 
 public struct SectionHeader: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     private let icon: String?
     private let title: String
     public init(_ title: String, icon: String? = nil) {

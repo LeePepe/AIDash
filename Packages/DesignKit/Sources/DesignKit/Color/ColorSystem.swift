@@ -6,12 +6,10 @@ import UIKit
 #endif
 
 // ============================================================================
-//  ColorSystem — the seed color system, shared verbatim with the web port
-//  (design-system/templates/shared/color-system.ts) and with the
-//  visual-design-modernization skill's references/color-system.md.
+//  ColorSystem — the native OS-appearance seed color system for AIDash.
 //
 //  ONE seed → the whole primary token set. Semantic colors are FIXED.
-//  Neutrals come from Radix slate or Tailwind neutral. Never invent a 2nd set.
+//  Neutrals come from calibrated slate or neutral tiers. Never invent a 2nd set.
 // ============================================================================
 
 public extension Color {
@@ -54,7 +52,7 @@ public func dynamicSystemColor(lightHex: String, darkHex: String) -> Color {
     dynamicSystemColor(light: Color(hex: lightHex), dark: Color(hex: darkHex))
 }
 
-// MARK: - Preset seeds (identical to the web port)
+// MARK: - Preset seeds
 
 public enum Seed: String, CaseIterable, Sendable {
     case blue, purple, teal, orange, appleBlue, lime
@@ -95,7 +93,7 @@ public enum Seed: String, CaseIterable, Sendable {
     /// So this is a second value for ONE seed, not a second palette: the
     /// whole dark ramp is still derived from this single anchor by the same
     /// HSB math, and `Semantic` / `Classification` are untouched. Seeds that
-    /// return `nil` keep the verbatim shared-with-web derivation.
+    /// return `nil` keep the standard unanchored HSB derivation.
     public var darkAnchorHex: String? {
         switch self {
         case .lime: return "#C6F04A"
@@ -160,13 +158,12 @@ private func contrastChoose(_ bg: Color) -> Color {
 
 private func clamp(_ x: Double) -> Double { min(1, max(0, x)) }
 
-/// One seed → the whole primary token set. Same math as the web `makePrimaryPalette`.
+/// One seed → the whole primary token set for a given light/dark ramp.
 ///
 /// `darkAnchor` overrides only the DARK primary hue/saturation/brightness
 /// starting point (see `Seed.darkAnchorHex`); the rest of the dark ramp is
 /// still derived from it by the same HSB relationships, so the "one seed
-/// system" holds. Pass `nil` (the default) for the verbatim shared-with-web
-/// derivation.
+/// system" holds. Pass `nil` (the default) for the standard HSB derivation.
 public func makePrimaryPalette(seed: Color, isDark: Bool, darkAnchor: Color? = nil) -> PrimaryPalette {
     let (h, s, b) = hsbComponents(seed)
     func c(_ hh: Double, _ ss: Double, _ bb: Double) -> Color {
@@ -188,10 +185,9 @@ public func makePrimaryPalette(seed: Color, isDark: Bool, darkAnchor: Color? = n
         // Saturation base for the subtle/muted/border chips.
         //
         // These three MUST stay on the seed's own `s` when unanchored: the
-        // shared-with-web derivation multiplies `s`, not the primary's
-        // `s - 0.05`. Routing them through `asat` (which folds in that -0.05
-        // primary-only adjustment) shifts all five unanchored seeds by 1–3
-        // per channel — a silent drift away from the verbatim web math.
+        // chip derivation multiplies `s`, not the primary's `s - 0.05`.
+        // Routing them through `asat` (which folds in that -0.05 primary-only
+        // adjustment) shifts all five unanchored seeds by 1–3 per channel.
         // An anchored seed has no separate seed saturation to fall back to;
         // its whole ramp is by definition derived from the anchor.
         let chipSat = isAnchored ? asat : s
@@ -250,7 +246,7 @@ public func makeDynamicPrimaryPalette(seed: Color, darkAnchor: Color? = nil) -> 
     )
 }
 
-/// On-brand chart palette — walk the hue wheel from the seed (same offsets as web).
+/// On-brand chart palette — walk the hue wheel from the seed.
 public func chartPalette(seed: Color, isDark: Bool) -> [Color] {
     let seedHue = hsbHue(seed) * 360
     let offsets: [Double] = [0, -15, 40, 95, 130, 175, -70, 210]
@@ -324,9 +320,9 @@ public enum Neutral: String, CaseIterable, Sendable {
 // MARK: - Semantic colors (FIXED — never seed-derived)
 
 public enum Semantic {
-    public static var success: Color { dynamicSystemColor(lightHex: "#34C759", darkHex: "#30D158") }
-    public static var warning: Color { dynamicSystemColor(lightHex: "#FF9500", darkHex: "#FF9F0A") }
-    public static var danger: Color { dynamicSystemColor(lightHex: "#FF3B30", darkHex: "#FF453A") }
+    public static let success: Color = dynamicSystemColor(lightHex: "#34C759", darkHex: "#30D158")
+    public static let warning: Color = dynamicSystemColor(lightHex: "#FF9500", darkHex: "#FF9F0A")
+    public static let danger: Color = dynamicSystemColor(lightHex: "#FF3B30", darkHex: "#FF453A")
 
     public static func success(isDark: Bool) -> Color { Color(hex: isDark ? "#30D158" : "#34C759") }
     public static func warning(isDark: Bool) -> Color { Color(hex: isDark ? "#FF9F0A" : "#FF9500") }
@@ -349,9 +345,9 @@ public enum Semantic {
     // palette. The dark success/warning values are already legible and are
     // returned unchanged.
 
-    public static var successOnSubtle: Color { dynamicSystemColor(lightHex: "#0C7727", darkHex: "#30D158") }
-    public static var warningOnSubtle: Color { dynamicSystemColor(lightHex: "#965800", darkHex: "#FF9F0A") }
-    public static var dangerOnSubtle: Color { dynamicSystemColor(lightHex: "#C3170E", darkHex: "#FF736A") }
+    public static let successOnSubtle: Color = dynamicSystemColor(lightHex: "#0C7727", darkHex: "#30D158")
+    public static let warningOnSubtle: Color = dynamicSystemColor(lightHex: "#965800", darkHex: "#FF9F0A")
+    public static let dangerOnSubtle: Color = dynamicSystemColor(lightHex: "#C3170E", darkHex: "#FF736A")
 
     /// `success` as small text on a `success`-tinted fill.
     public static func successOnSubtle(isDark: Bool) -> Color { Color(hex: isDark ? "#30D158" : "#0C7727") }
@@ -407,9 +403,15 @@ public enum Classification: String, CaseIterable, Sendable {
     case metric, insight, digest, agentSummary, todoList, trending, barList, stackedBar, teamAudit, hourlyTimeline
     case relationship
 
+    private static let dynamicTints: [Classification: Color] = Dictionary(
+        uniqueKeysWithValues: Classification.allCases.map { item in
+            (item, dynamicSystemColor(light: item.tint(isDark: false), dark: item.tint(isDark: true)))
+        }
+    )
+
     /// Dynamic OS-appearance tint resolving light vs dark at draw time.
     public var dynamicTint: Color {
-        dynamicSystemColor(light: tint(isDark: false), dark: tint(isDark: true))
+        Self.dynamicTints[self] ?? tint(isDark: false)
     }
 
     /// Resolved tint for the current color scheme. Light/dark hex pairs mirror
