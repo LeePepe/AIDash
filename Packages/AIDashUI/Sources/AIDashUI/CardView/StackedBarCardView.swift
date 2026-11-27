@@ -268,7 +268,6 @@ private struct StackedBarLegendRow: View {
     )
     .frame(width: 320)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
 }
 
 #Preview("stackedBar — model tiers (categorical)") {
@@ -286,5 +285,4 @@ private struct StackedBarLegendRow: View {
     )
     .frame(width: 320)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
 }

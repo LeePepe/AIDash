@@ -179,8 +179,6 @@ public struct RelationshipCardView: View {
     )
     .frame(width: 340)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
-    .environment(\.colorScheme, .light)
 }
 
 #Preview("relationship — scatter, wide, dark") {
@@ -191,8 +189,6 @@ public struct RelationshipCardView: View {
     )
     .frame(width: 720)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
-    .environment(\.colorScheme, .dark)
 }
 
 #Preview("relationship — heatmap, medium, dark") {
@@ -203,8 +199,6 @@ public struct RelationshipCardView: View {
     )
     .frame(width: 340)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
-    .environment(\.colorScheme, .dark)
 }
 
 #Preview("relationship — heatmap, wide, light") {
@@ -215,8 +209,6 @@ public struct RelationshipCardView: View {
     )
     .frame(width: 720)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
-    .environment(\.colorScheme, .light)
 }
 
 #Preview("relationship — slope, medium, light") {
@@ -227,8 +219,6 @@ public struct RelationshipCardView: View {
     )
     .frame(width: 340)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
-    .environment(\.colorScheme, .light)
 }
 
 #Preview("relationship — slope, wide, dark") {
@@ -239,8 +229,6 @@ public struct RelationshipCardView: View {
     )
     .frame(width: 720)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
-    .environment(\.colorScheme, .dark)
 }
 
 // MARK: - Preview fixtures

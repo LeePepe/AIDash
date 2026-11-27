@@ -321,7 +321,6 @@ enum BarListFormat {
     )
     .frame(width: 320)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
 }
 
 #Preview("barList — app focus (pure ranking)") {
@@ -336,5 +335,4 @@ enum BarListFormat {
     )
     .frame(width: 320)
     .padding()
-    .designTheme(seed: .lime, neutral: .slate)
 }
