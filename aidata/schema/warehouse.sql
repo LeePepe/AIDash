@@ -635,3 +635,40 @@ CREATE INDEX IF NOT EXISTS idx_agent_horizon_waste_cst_day
 CREATE INDEX IF NOT EXISTS idx_agent_horizon_waste_skill_role
     ON fact_agent_horizon_waste(skill, role_key);
 
+-- ---------------------------------------------------------------------------
+-- Session work summary facts (Session Work Receipt grain).
+-- Opt-in from clean/session_work.db; CST calendar day is materialized via
+-- STORED generated column (+8 hours), never host-dependent localtime.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fact_session_work_summary (
+    session_uid TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    session_id_short TEXT NOT NULL,
+    goal_id TEXT,
+    repo_name TEXT,
+    branch_name TEXT,
+    role_key TEXT NOT NULL,
+    model_id TEXT,
+    summary_label TEXT,
+    started_at TEXT,
+    ended_at TEXT,
+    duration_sec REAL NOT NULL DEFAULT 0 CHECK(duration_sec >= 0),
+    turn_count INTEGER NOT NULL DEFAULT 0 CHECK(turn_count >= 0),
+    total_tokens INTEGER NOT NULL DEFAULT 0 CHECK(total_tokens >= 0),
+    skills_json TEXT NOT NULL DEFAULT '[]',
+    search_read_calls INTEGER NOT NULL DEFAULT 0 CHECK(search_read_calls >= 0),
+    code_edit_calls INTEGER NOT NULL DEFAULT 0 CHECK(code_edit_calls >= 0),
+    verify_script_calls INTEGER NOT NULL DEFAULT 0 CHECK(verify_script_calls >= 0),
+    spin_rework_calls INTEGER NOT NULL DEFAULT 0 CHECK(spin_rework_calls >= 0),
+    files_changed_count INTEGER NOT NULL DEFAULT 0 CHECK(files_changed_count >= 0),
+    commits_count INTEGER NOT NULL DEFAULT 0 CHECK(commits_count >= 0),
+    pr_number INTEGER,
+    slow_or_failed_scripts_json TEXT NOT NULL DEFAULT '[]',
+    cst_day TEXT GENERATED ALWAYS AS (date(COALESCE(ended_at, started_at), '+8 hours')) STORED
+);
+CREATE INDEX IF NOT EXISTS idx_session_work_cst_day
+    ON fact_session_work_summary(cst_day);
+CREATE INDEX IF NOT EXISTS idx_session_work_goal_id
+    ON fact_session_work_summary(goal_id, cst_day);
+
+
