@@ -90,7 +90,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     private var renderBody: some View {
         Group {
             if explicitState != nil {
-                pageContent()
+                pageContent(usesLazyContainers: false)
             } else {
                 scrollBody
             }
@@ -99,7 +99,30 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
         .environment(\.onHideCard, hideCard)
     }
     @ViewBuilder
-    private func pageContent(proxy: ScrollViewProxy? = nil) -> some View {
+    private func containerList(
+        _ containers: [ContainerModel],
+        usesLazyContainers: Bool
+    ) -> some View {
+        let sorted = containers.sorted { $0.order < $1.order }
+        if usesLazyContainers {
+            LazyVStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
+                ForEach(sorted) {
+                    ContainerView(container: $0)
+                        .id($0.id)
+                }
+            }
+        } else {
+            ForEach(sorted) {
+                ContainerView(container: $0)
+                    .id($0.id)
+            }
+        }
+    }
+    @ViewBuilder
+    private func pageContent(
+        proxy: ScrollViewProxy? = nil,
+        usesLazyContainers: Bool = true
+    ) -> some View {
         VStack(alignment: .leading, spacing: AIDashSpacing.containerVertical) {
             switch resolvedState {
             case let .populated(date, containers, isFallback, publishedAt):
@@ -109,10 +132,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                 if visibleContainers.isEmpty {
                     emptyContainersState
                 } else {
-                    ForEach(visibleContainers.sorted { $0.order < $1.order }) {
-                        ContainerView(container: $0)
-                            .id($0.id)
-                    }
+                    containerList(visibleContainers, usesLazyContainers: usesLazyContainers)
                 }
             case .loading:
                 stateMasthead
@@ -127,10 +147,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                 let visibleContainers = filteredContainers(containers)
                 masthead(date: date, isFallback: true, publishedAt: publishedAt)
                 staleErrorBanner
-                ForEach(visibleContainers.sorted { $0.order < $1.order }) {
-                    ContainerView(container: $0)
-                        .id($0.id)
-                }
+                containerList(visibleContainers, usesLazyContainers: usesLazyContainers)
             }
         }
     }
@@ -138,7 +155,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
     private var scrollBody: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                pageContent(proxy: proxy)
+                pageContent(proxy: proxy, usesLazyContainers: true)
                     .padding(.horizontal, Self.pageHorizontalPadding)
                     .padding(.vertical, AIDashSpacing.pageVertical)
                     .frame(maxWidth: Space.contentMaxWidth, alignment: .leading)
