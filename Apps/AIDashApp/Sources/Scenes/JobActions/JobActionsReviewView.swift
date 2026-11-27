@@ -99,7 +99,7 @@ struct JobActionsReviewView: View {
                     }
                     .keyboardShortcut(.cancelAction)
                     .disabled(review.phase == .recording)
-                    Button(action: confirm) {
+                    Button(action: retry) {
                         Text("job_actions.review.confirm").frame(minHeight: 28)
                     }
                     .buttonStyle(.borderedProminent)
@@ -112,6 +112,10 @@ struct JobActionsReviewView: View {
         .lineLimit(nil)
         .background(theme.neutrals.bg)
         .frame(minWidth: 480, idealWidth: 560, maxWidth: 640, minHeight: 360, idealHeight: 600, maxHeight: 720)
+    }
+
+    private func retry() {
+        confirm()
     }
 
     @ViewBuilder private var status: some View {

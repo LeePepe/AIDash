@@ -320,7 +320,7 @@ public struct ScheduledPulsePageView: View {
                     HStack(spacing: 8) {
                         Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "Run now")) { store.runScheduledJobNow(entry.id) }
                             .buttonStyle(.borderedProminent).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-run", role: "button")
-                        Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "Refresh status")) { store.refreshFromProvider() }
+                        Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "Refresh status")) { reload() }
                             .buttonStyle(.bordered).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-refresh", role: "button")
                         Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "Stop") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "Start")) {
                             handle(entry.launchdStatus?.isLoaded == true ? store.stopScheduledJob(entry.id) : store.startScheduledJob(entry.id))
@@ -574,7 +574,7 @@ public struct ScheduledPulsePageView: View {
                     .disabled(store.runningJobIDs.contains(entry.id) || !entry.definition.isLive)
                     .captureDashboardGeometry(id: "pulse-run", role: "button")
                 if store.runningJobIDs.contains(entry.id) { ProgressView().controlSize(.small) }
-                Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "刷新状态")) { store.refreshFromProvider() }
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "刷新状态")) { reload() }
                     .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
                     .captureDashboardGeometry(id: "pulse-refresh", role: "button")
                 Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) {
@@ -667,6 +667,10 @@ public struct ScheduledPulsePageView: View {
     private func select(_ entry: ScheduledJobFrameworkEntry) {
         store.selectedFrameworkJobID = entry.id
         store.scheduledPulseTab = .overview
+    }
+
+    private func reload() {
+        store.refreshFromProvider()
     }
 
     private func handle(_ outcome: ScheduledPulseLaunchdInstaller.RegistrationOutcome) {
