@@ -1,4 +1,5 @@
 #if os(macOS)
+// swiftlint:disable file_length
 import AppKit
 import Foundation
 import SwiftUI
@@ -305,6 +306,45 @@ public struct PreviewSkillMetric: Identifiable, Sendable, Equatable {
     public var isIdle: Bool { calls30d <= 2 }
 }
 
+public struct PreviewGoalWorkMetric: Identifiable, Sendable, Equatable {
+    public let id, title, repoName, status, reviewBadge, deltaText: String
+    public let durationMinutes: Double
+    public let filesChanged, prNumber, sessionCount: Int
+    public let searchPct, editPct, verifyPct, reworkPct: Double
+    public let skillsSummary: [String]
+    public let aiSignalLabel: String
+    public let childSessions: [PreviewSessionReceiptMetric]
+
+    public init(
+        id: String, title: String, repoName: String, status: String, reviewBadge: String,
+        durationMinutes: Double, filesChanged: Int, prNumber: Int, sessionCount: Int,
+        searchPct: Double, editPct: Double, verifyPct: Double, reworkPct: Double,
+        skillsSummary: [String], aiSignalLabel: String, deltaText: String,
+        childSessions: [PreviewSessionReceiptMetric]
+    ) {
+        self.id = id; self.title = title; self.repoName = repoName; self.status = status
+        self.reviewBadge = reviewBadge; self.durationMinutes = durationMinutes
+        self.filesChanged = filesChanged; self.prNumber = prNumber; self.sessionCount = sessionCount
+        self.searchPct = searchPct; self.editPct = editPct; self.verifyPct = verifyPct
+        self.reworkPct = reworkPct; self.skillsSummary = skillsSummary
+        self.aiSignalLabel = aiSignalLabel; self.deltaText = deltaText; self.childSessions = childSessions
+    }
+}
+
+public struct PreviewSessionReceiptMetric: Identifiable, Sendable, Equatable {
+    public let id, roleTitle, modelName, durationText, ioText, skillsText: String
+    public let tokens: UInt64
+
+    public init(
+        id: String, roleTitle: String, modelName: String, durationText: String,
+        ioText: String, skillsText: String, tokens: UInt64
+    ) {
+        self.id = id; self.roleTitle = roleTitle; self.modelName = modelName
+        self.durationText = durationText; self.ioText = ioText
+        self.skillsText = skillsText; self.tokens = tokens
+    }
+}
+
 @MainActor
 public struct AIDashPreviewSampleData: Equatable {
     public let quotas: [PreviewCLIQuota]
@@ -314,14 +354,17 @@ public struct AIDashPreviewSampleData: Equatable {
     public let inspections: [PreviewScheduledInspectionMetric]
     public let repos: [PreviewRepoTrendMetric]
     public let skills: [PreviewSkillMetric]
+    public let goalStreams: [PreviewGoalWorkMetric]
 
     public init(
         quotas: [PreviewCLIQuota], tokenPoints: [PreviewTokenPoint], roles: [PreviewRoleMetric],
         models: [PreviewModelMetric], inspections: [PreviewScheduledInspectionMetric],
-        repos: [PreviewRepoTrendMetric], skills: [PreviewSkillMetric]
+        repos: [PreviewRepoTrendMetric], skills: [PreviewSkillMetric],
+        goalStreams: [PreviewGoalWorkMetric] = []
     ) {
         self.quotas = quotas; self.tokenPoints = tokenPoints; self.roles = roles
-        self.models = models; self.inspections = inspections; self.repos = repos; self.skills = skills
+        self.models = models; self.inspections = inspections; self.repos = repos
+        self.skills = skills; self.goalStreams = goalStreams
     }
 
     public static func liveOrFallback() -> Self {
@@ -352,7 +395,8 @@ public struct AIDashPreviewSampleData: Equatable {
             quotas: liveQuotas.count >= 5 ? liveQuotas : fallback.quotas,
             tokenPoints: livePoints.count >= 14 ? livePoints : fallback.tokenPoints,
             roles: fallback.roles, models: fallback.models,
-            inspections: fallback.inspections, repos: fallback.repos, skills: fallback.skills
+            inspections: fallback.inspections, repos: fallback.repos,
+            skills: fallback.skills, goalStreams: fallback.goalStreams
         )
     }
 
@@ -404,7 +448,92 @@ public struct AIDashPreviewSampleData: Equatable {
             PreviewRepoTrendMetric(id: "Financial", repoName: "Financial", completedTasks30d: 21, totalCalls30d: 490, firstPassRate: 0.87, avgTaskMinutes: 7.1, deltaText: "▲ +5.3%", activityTrend14d: [5, 6, 7, 8, 9, 11, 13]),
             PreviewRepoTrendMetric(id: "VitalStride", repoName: "VitalStride", completedTasks30d: 17, totalCalls30d: 370, firstPassRate: 0.85, avgTaskMinutes: 7.8, deltaText: "▲ +4.6%", activityTrend14d: [4, 5, 6, 6, 8, 9, 11])
         ]
-        return Self(quotas: quotas, tokenPoints: points, roles: roles, models: models, inspections: inspections, repos: repos, skills: buildAll24Skills())
+        return Self(
+            quotas: quotas, tokenPoints: points, roles: roles, models: models,
+            inspections: inspections, repos: repos, skills: buildAll24Skills(),
+            goalStreams: buildSampleGoalStreams()
+        )
+    }
+
+    private static func buildSampleGoalStreams() -> [PreviewGoalWorkMetric] {
+        [
+            PreviewGoalWorkMetric(
+                id: "goal-workbench-ui",
+                title: "三段式工作台与单页会话账单升级",
+                repoName: "AIDash",
+                status: "active",
+                reviewBadge: "一次过审",
+                durationMinutes: 24,
+                filesChanged: 6,
+                prNumber: 346,
+                sessionCount: 3,
+                searchPct: 28, editPct: 48, verifyPct: 20, reworkPct: 4,
+                skillsSummary: ["team-lead · 4 脚本", "my-designer · 3 脚本", "aidash-metrics · 2 参考"],
+                aiSignalLabel: "首轮审查一次通过，探查与编码节奏均衡",
+                deltaText: "▲ 一次过审",
+                childSessions: [
+                    PreviewSessionReceiptMetric(id: "s-tl", roleTitle: "Goal 主控", modelName: "Gemini 4 Carbon", durationText: "6m", ioText: "搜读 8 · 改 1 文件", skillsText: "team-lead · my-designer", tokens: 68_000),
+                    PreviewSessionReceiptMetric(id: "s-wr", roleTitle: "编码", modelName: "GPT-5.6", durationText: "14m", ioText: "搜读 11 · 改 5 文件", skillsText: "xcode-cli · my-designer", tokens: 124_000),
+                    PreviewSessionReceiptMetric(id: "s-rv", roleTitle: "审查", modelName: "Gemini 4 Argon", durationText: "4m", ioText: "搜读 6 · 改 0 文件", skillsText: "code-review", tokens: 42_000),
+                ]
+            ),
+            PreviewGoalWorkMetric(
+                id: "goal-session-work-pipeline",
+                title: "数仓会话聚合与四段动作占比快照",
+                repoName: "AIDash",
+                status: "done",
+                reviewBadge: "一次过审",
+                durationMinutes: 31,
+                filesChanged: 11,
+                prNumber: 345,
+                sessionCount: 4,
+                searchPct: 24, editPct: 52, verifyPct: 24, reworkPct: 0,
+                skillsSummary: ["aidash-metrics · 3 脚本", "layered-data-warehouse · 2 参考"],
+                aiSignalLabel: "交付链路平稳，无空载技能或脚本阻塞",
+                deltaText: "▼ 返工归零",
+                childSessions: [
+                    PreviewSessionReceiptMetric(id: "s-dw1", roleTitle: "Goal 主控", modelName: "GPT-6.1", durationText: "7m", ioText: "搜读 9 · 改 2 文件", skillsText: "team-lead · aidash-metrics", tokens: 74_000),
+                    PreviewSessionReceiptMetric(id: "s-dw2", roleTitle: "编码", modelName: "GPT-5.6", durationText: "19m", ioText: "搜读 10 · 改 9 文件", skillsText: "layered-data-warehouse", tokens: 158_000),
+                ]
+            ),
+            PreviewGoalWorkMetric(
+                id: "goal-skill-contract-gate",
+                title: "技能契约自动巡检与空挂收敛",
+                repoName: "user-skills",
+                status: "in_review",
+                reviewBadge: "二轮收敛",
+                durationMinutes: 19,
+                filesChanged: 5,
+                prNumber: 218,
+                sessionCount: 3,
+                searchPct: 36, editPct: 38, verifyPct: 14, reworkPct: 12,
+                skillsSummary: ["skill-contract · 2 脚本", "design-studio · 空挂预警"],
+                aiSignalLabel: "技能空载提醒：design-studio 已加载但未命中参考或脚本",
+                deltaText: "▼ 识别空挂 1 项",
+                childSessions: [
+                    PreviewSessionReceiptMetric(id: "s-sc1", roleTitle: "编码", modelName: "Claude Opus", durationText: "13m", ioText: "搜读 14 · 改 5 文件", skillsText: "skill-contract", tokens: 112_000),
+                    PreviewSessionReceiptMetric(id: "s-sc2", roleTitle: "审查", modelName: "Gemini 4 Argon", durationText: "6m", ioText: "搜读 7 · 改 0 文件", skillsText: "code-review", tokens: 48_000),
+                ]
+            ),
+            PreviewGoalWorkMetric(
+                id: "goal-unassigned-daily",
+                title: "日常独立会话（未绑定独立 Goal）",
+                repoName: "Atlas",
+                status: "daily",
+                reviewBadge: "日常探索",
+                durationMinutes: 42,
+                filesChanged: 9,
+                prNumber: 0,
+                sessionCount: 6,
+                searchPct: 45, editPct: 40, verifyPct: 10, reworkPct: 5,
+                skillsSummary: ["howto · 2 参考", "knowledge-digest · 1 参考"],
+                aiSignalLabel: "探查阅读占比偏高，可补充模块目录索引",
+                deltaText: "▲ 独立会话归集",
+                childSessions: [
+                    PreviewSessionReceiptMetric(id: "s-dl1", roleTitle: "编码", modelName: "Gemini 4 Argon", durationText: "15m", ioText: "搜读 12 · 改 4 文件", skillsText: "howto", tokens: 94_000),
+                ]
+            ),
+        ]
     }
 
     private struct SkillSeed {

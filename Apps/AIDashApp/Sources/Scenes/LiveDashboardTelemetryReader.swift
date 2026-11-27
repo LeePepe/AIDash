@@ -549,6 +549,685 @@ public struct AgentRetroWorkbenchSummary: Codable, Sendable, Equatable {
     }
 }
 
+public struct WorkStatusActionSplit: Codable, Sendable, Equatable {
+    public let totalCalls: Int
+    public let searchReadCalls: Int
+    public let codeEditCalls: Int
+    public let verifyScriptCalls: Int
+    public let spinReworkCalls: Int
+    public let searchReadPct: Double
+    public let codeEditPct: Double
+    public let verifyScriptPct: Double
+    public let spinReworkPct: Double
+
+    enum CodingKeys: String, CodingKey {
+        case totalCalls = "total_calls"
+        case searchReadCalls = "search_read_calls"
+        case codeEditCalls = "code_edit_calls"
+        case verifyScriptCalls = "verify_script_calls"
+        case spinReworkCalls = "spin_rework_calls"
+        case searchReadPct = "search_read_pct"
+        case codeEditPct = "code_edit_pct"
+        case verifyScriptPct = "verify_script_pct"
+        case spinReworkPct = "spin_rework_pct"
+    }
+
+    public init(
+        totalCalls: Int? = nil,
+        searchReadCalls: Int = 0,
+        codeEditCalls: Int = 0,
+        verifyScriptCalls: Int = 0,
+        spinReworkCalls: Int = 0,
+        searchReadPct: Double? = nil,
+        codeEditPct: Double? = nil,
+        verifyScriptPct: Double? = nil,
+        spinReworkPct: Double? = nil
+    ) {
+        let sr = max(0, searchReadCalls)
+        let ce = max(0, codeEditCalls)
+        let vs = max(0, verifyScriptCalls)
+        let sw = max(0, spinReworkCalls)
+        let sumCalls = saturatingAddInt(saturatingAddInt(sr, ce), saturatingAddInt(vs, sw))
+        let resolvedTotal = max(0, totalCalls ?? sumCalls)
+        self.totalCalls = resolvedTotal
+        self.searchReadCalls = sr
+        self.codeEditCalls = ce
+        self.verifyScriptCalls = vs
+        self.spinReworkCalls = sw
+        let denom = sumCalls > 0 ? Double(sumCalls) : 0
+        let defaultSR = denom > 0 ? (100.0 * Double(sr) / denom) : 0
+        let defaultCE = denom > 0 ? (100.0 * Double(ce) / denom) : 0
+        let defaultVS = denom > 0 ? (100.0 * Double(vs) / denom) : 0
+        let defaultSW = denom > 0 ? max(0, 100.0 - defaultSR - defaultCE - defaultVS) : 0
+        self.searchReadPct = max(0, searchReadPct ?? defaultSR)
+        self.codeEditPct = max(0, codeEditPct ?? defaultCE)
+        self.verifyScriptPct = max(0, verifyScriptPct ?? defaultVS)
+        self.spinReworkPct = max(0, spinReworkPct ?? defaultSW)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let sr = max(0, (try? container.decode(Int.self, forKey: .searchReadCalls)) ?? 0)
+        let ce = max(0, (try? container.decode(Int.self, forKey: .codeEditCalls)) ?? 0)
+        let vs = max(0, (try? container.decode(Int.self, forKey: .verifyScriptCalls)) ?? 0)
+        let sw = max(0, (try? container.decode(Int.self, forKey: .spinReworkCalls)) ?? 0)
+        self.init(
+            totalCalls: try? container.decode(Int.self, forKey: .totalCalls),
+            searchReadCalls: sr,
+            codeEditCalls: ce,
+            verifyScriptCalls: vs,
+            spinReworkCalls: sw,
+            searchReadPct: try? container.decode(Double.self, forKey: .searchReadPct),
+            codeEditPct: try? container.decode(Double.self, forKey: .codeEditPct),
+            verifyScriptPct: try? container.decode(Double.self, forKey: .verifyScriptPct),
+            spinReworkPct: try? container.decode(Double.self, forKey: .spinReworkPct)
+        )
+    }
+}
+
+public struct WorkStatusPulseSummary: Codable, Sendable, Equatable {
+    public let goalsCount: Int
+    public let bucketsCount: Int
+    public let sessionsCount: Int
+    public let durationSec: Double
+    public let totalTokens: UInt64
+    public let filesChangedCount: Int
+    public let commitsCount: Int
+    public let prsTouchedCount: Int
+    public let actionSplit: WorkStatusActionSplit
+
+    enum CodingKeys: String, CodingKey {
+        case goalsCount = "goals_count"
+        case bucketsCount = "buckets_count"
+        case sessionsCount = "sessions_count"
+        case durationSec = "duration_sec"
+        case totalTokens = "total_tokens"
+        case filesChangedCount = "files_changed_count"
+        case commitsCount = "commits_count"
+        case prsTouchedCount = "prs_touched_count"
+        case actionSplit = "action_split"
+    }
+
+    public init(
+        goalsCount: Int = 0,
+        bucketsCount: Int = 0,
+        sessionsCount: Int = 0,
+        durationSec: Double = 0,
+        totalTokens: UInt64 = 0,
+        filesChangedCount: Int = 0,
+        commitsCount: Int = 0,
+        prsTouchedCount: Int = 0,
+        actionSplit: WorkStatusActionSplit = WorkStatusActionSplit()
+    ) {
+        self.goalsCount = max(0, goalsCount)
+        self.bucketsCount = max(0, bucketsCount)
+        self.sessionsCount = max(0, sessionsCount)
+        self.durationSec = max(0, durationSec)
+        self.totalTokens = totalTokens
+        self.filesChangedCount = max(0, filesChangedCount)
+        self.commitsCount = max(0, commitsCount)
+        self.prsTouchedCount = max(0, prsTouchedCount)
+        self.actionSplit = actionSplit
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.goalsCount = max(0, (try? container.decode(Int.self, forKey: .goalsCount)) ?? 0)
+        self.bucketsCount = max(0, (try? container.decode(Int.self, forKey: .bucketsCount)) ?? 0)
+        self.sessionsCount = max(0, (try? container.decode(Int.self, forKey: .sessionsCount)) ?? 0)
+        self.durationSec = max(0, (try? container.decode(Double.self, forKey: .durationSec)) ?? 0)
+        self.totalTokens = (try? container.decode(UInt64.self, forKey: .totalTokens)) ?? 0
+        self.filesChangedCount = max(0, (try? container.decode(Int.self, forKey: .filesChangedCount)) ?? 0)
+        self.commitsCount = max(0, (try? container.decode(Int.self, forKey: .commitsCount)) ?? 0)
+        self.prsTouchedCount = max(0, (try? container.decode(Int.self, forKey: .prsTouchedCount)) ?? 0)
+        self.actionSplit = (try? container.decode(WorkStatusActionSplit.self, forKey: .actionSplit))
+            ?? WorkStatusActionSplit()
+    }
+}
+
+public struct WorkStatusGoalSkillTouch: Codable, Sendable, Equatable, Identifiable {
+    public let skill: String
+    public let sessionLoads: Int
+    public let referenceSessions: Int
+    public let scriptSessions: Int
+    public let usedReference: Bool
+    public let usedScript: Bool
+    public let emptyLoad: Bool
+
+    public var id: String { skill }
+
+    enum CodingKeys: String, CodingKey {
+        case skill
+        case sessionLoads = "session_loads"
+        case referenceSessions = "reference_sessions"
+        case scriptSessions = "script_sessions"
+        case usedReference = "used_reference"
+        case usedScript = "used_script"
+        case emptyLoad = "empty_load"
+    }
+
+    public init(
+        skill: String,
+        sessionLoads: Int = 1,
+        referenceSessions: Int = 0,
+        scriptSessions: Int = 0,
+        usedReference: Bool? = nil,
+        usedScript: Bool? = nil,
+        emptyLoad: Bool? = nil
+    ) {
+        self.skill = skill
+        self.sessionLoads = max(0, sessionLoads)
+        let refS = max(0, referenceSessions)
+        let scrS = max(0, scriptSessions)
+        self.referenceSessions = refS
+        self.scriptSessions = scrS
+        let uRef = usedReference ?? (refS > 0)
+        let uScr = usedScript ?? (scrS > 0)
+        self.usedReference = uRef
+        self.usedScript = uScr
+        self.emptyLoad = emptyLoad ?? (!uRef && !uScr)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let sk = (try? container.decode(String.self, forKey: .skill)) ?? ""
+        let loads = max(0, (try? container.decode(Int.self, forKey: .sessionLoads)) ?? 1)
+        let refS = max(0, (try? container.decode(Int.self, forKey: .referenceSessions)) ?? 0)
+        let scrS = max(0, (try? container.decode(Int.self, forKey: .scriptSessions)) ?? 0)
+        self.init(
+            skill: sk,
+            sessionLoads: loads,
+            referenceSessions: refS,
+            scriptSessions: scrS,
+            usedReference: try? container.decode(Bool.self, forKey: .usedReference),
+            usedScript: try? container.decode(Bool.self, forKey: .usedScript),
+            emptyLoad: try? container.decode(Bool.self, forKey: .emptyLoad)
+        )
+    }
+}
+
+public struct WorkStatusSessionSkillTouch: Codable, Sendable, Equatable, Identifiable {
+    public let skill: String
+    public let usedReference: Bool
+    public let usedScript: Bool
+    public let emptyLoad: Bool
+
+    public var id: String { skill }
+
+    enum CodingKeys: String, CodingKey {
+        case skill
+        case usedReference = "used_reference"
+        case usedScript = "used_script"
+        case emptyLoad = "empty_load"
+    }
+
+    public init(
+        skill: String,
+        usedReference: Bool = false,
+        usedScript: Bool = false,
+        emptyLoad: Bool? = nil
+    ) {
+        self.skill = skill
+        self.usedReference = usedReference
+        self.usedScript = usedScript
+        self.emptyLoad = emptyLoad ?? (!usedReference && !usedScript)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let sk = (try? container.decode(String.self, forKey: .skill)) ?? ""
+        let uRef = (try? container.decode(Bool.self, forKey: .usedReference)) ?? false
+        let uScr = (try? container.decode(Bool.self, forKey: .usedScript)) ?? false
+        self.init(
+            skill: sk,
+            usedReference: uRef,
+            usedScript: uScr,
+            emptyLoad: try? container.decode(Bool.self, forKey: .emptyLoad)
+        )
+    }
+}
+
+public struct WorkStatusGoalOutputs: Codable, Sendable, Equatable {
+    public let filesChangedCount: Int
+    public let commitsCount: Int
+    public let prNumber: Int?
+    public let sessionCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case filesChangedCount = "files_changed_count"
+        case commitsCount = "commits_count"
+        case prNumber = "pr_number"
+        case sessionCount = "session_count"
+    }
+
+    public init(
+        filesChangedCount: Int = 0,
+        commitsCount: Int = 0,
+        prNumber: Int? = nil,
+        sessionCount: Int = 0
+    ) {
+        self.filesChangedCount = max(0, filesChangedCount)
+        self.commitsCount = max(0, commitsCount)
+        self.prNumber = prNumber.flatMap { $0 > 0 ? $0 : nil }
+        self.sessionCount = max(0, sessionCount)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            filesChangedCount: (try? container.decode(Int.self, forKey: .filesChangedCount)) ?? 0,
+            commitsCount: (try? container.decode(Int.self, forKey: .commitsCount)) ?? 0,
+            prNumber: try? container.decodeIfPresent(Int.self, forKey: .prNumber),
+            sessionCount: (try? container.decode(Int.self, forKey: .sessionCount)) ?? 0
+        )
+    }
+}
+
+public struct WorkStatusSessionOutputs: Codable, Sendable, Equatable {
+    public let filesChangedCount: Int
+    public let commitsCount: Int
+    public let prNumber: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case filesChangedCount = "files_changed_count"
+        case commitsCount = "commits_count"
+        case prNumber = "pr_number"
+    }
+
+    public init(
+        filesChangedCount: Int = 0,
+        commitsCount: Int = 0,
+        prNumber: Int? = nil
+    ) {
+        self.filesChangedCount = max(0, filesChangedCount)
+        self.commitsCount = max(0, commitsCount)
+        self.prNumber = prNumber.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            filesChangedCount: (try? container.decode(Int.self, forKey: .filesChangedCount)) ?? 0,
+            commitsCount: (try? container.decode(Int.self, forKey: .commitsCount)) ?? 0,
+            prNumber: try? container.decodeIfPresent(Int.self, forKey: .prNumber)
+        )
+    }
+}
+
+public struct WorkStatusAISignal: Codable, Sendable, Equatable, Identifiable {
+    public let kind: String
+    public let severity: String
+    public let target: String
+    public let labelZh: String
+    public let labelEn: String
+
+    public var id: String { "\(kind):\(target):\(labelZh)" }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case severity
+        case target
+        case labelZh = "label_zh"
+        case labelEn = "label_en"
+    }
+
+    public init(
+        kind: String,
+        severity: String = "info",
+        target: String = "workflow",
+        labelZh: String,
+        labelEn: String
+    ) {
+        self.kind = kind
+        self.severity = severity
+        self.target = target
+        self.labelZh = labelZh
+        self.labelEn = labelEn
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let k = (try? container.decode(String.self, forKey: .kind)) ?? "signal"
+        let zh = (try? container.decode(String.self, forKey: .labelZh)) ?? k
+        let en = (try? container.decode(String.self, forKey: .labelEn)) ?? zh
+        self.init(
+            kind: k,
+            severity: (try? container.decode(String.self, forKey: .severity)) ?? "info",
+            target: (try? container.decode(String.self, forKey: .target)) ?? "workflow",
+            labelZh: zh,
+            labelEn: en
+        )
+    }
+}
+
+public struct WorkStatusSessionReceipt: Codable, Sendable, Equatable, Identifiable {
+    public let sessionUID: String
+    public let sessionIDShort: String
+    public let source: String
+    public let roleKey: String
+    public let roleLabelZh: String
+    public let roleLabelEn: String
+    public let modelID: String?
+    public let branch: String?
+    public let summaryLabel: String?
+    public let startedAt: String?
+    public let endedAt: String?
+    public let cstDay: String?
+    public let durationSec: Double
+    public let turnCount: Int
+    public let totalTokens: UInt64
+    public let skillsUsed: [WorkStatusSessionSkillTouch]
+    public let actionSplit: WorkStatusActionSplit
+    public let outputs: WorkStatusSessionOutputs
+
+    public var id: String { sessionUID.isEmpty ? sessionIDShort : sessionUID }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionUID = "session_uid"
+        case sessionIDShort = "session_id_short"
+        case source
+        case roleKey = "role_key"
+        case roleLabelZh = "role_label_zh"
+        case roleLabelEn = "role_label_en"
+        case modelID = "model_id"
+        case branch
+        case summaryLabel = "summary_label"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
+        case cstDay = "cst_day"
+        case durationSec = "duration_sec"
+        case turnCount = "turn_count"
+        case totalTokens = "total_tokens"
+        case skillsUsed = "skills_used"
+        case actionSplit = "action_split"
+        case outputs
+    }
+
+    public init(
+        sessionUID: String,
+        sessionIDShort: String,
+        source: String = "copilot_cli",
+        roleKey: String = "writer",
+        roleLabelZh: String = "",
+        roleLabelEn: String = "",
+        modelID: String? = nil,
+        branch: String? = nil,
+        summaryLabel: String? = nil,
+        startedAt: String? = nil,
+        endedAt: String? = nil,
+        cstDay: String? = nil,
+        durationSec: Double = 0,
+        turnCount: Int = 0,
+        totalTokens: UInt64 = 0,
+        skillsUsed: [WorkStatusSessionSkillTouch] = [],
+        actionSplit: WorkStatusActionSplit = WorkStatusActionSplit(),
+        outputs: WorkStatusSessionOutputs = WorkStatusSessionOutputs()
+    ) {
+        self.sessionUID = sessionUID
+        self.sessionIDShort = sessionIDShort
+        self.source = source
+        self.roleKey = roleKey
+        self.roleLabelZh = roleLabelZh
+        self.roleLabelEn = roleLabelEn
+        self.modelID = modelID
+        self.branch = branch
+        self.summaryLabel = summaryLabel
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.cstDay = cstDay
+        self.durationSec = max(0, durationSec)
+        self.turnCount = max(0, turnCount)
+        self.totalTokens = totalTokens
+        self.skillsUsed = skillsUsed.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        self.actionSplit = actionSplit
+        self.outputs = outputs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rKey = (try? container.decode(String.self, forKey: .roleKey)) ?? "writer"
+        let decodedSkills = ((try? container.decode([WorkStatusSessionSkillTouch].self, forKey: .skillsUsed)) ?? [])
+            .filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        self.init(
+            sessionUID: (try? container.decode(String.self, forKey: .sessionUID)) ?? "",
+            sessionIDShort: (try? container.decode(String.self, forKey: .sessionIDShort)) ?? "00000000",
+            source: (try? container.decode(String.self, forKey: .source)) ?? "copilot_cli",
+            roleKey: rKey,
+            roleLabelZh: (try? container.decode(String.self, forKey: .roleLabelZh)) ?? rKey,
+            roleLabelEn: (try? container.decode(String.self, forKey: .roleLabelEn)) ?? rKey,
+            modelID: try? container.decodeIfPresent(String.self, forKey: .modelID),
+            branch: try? container.decodeIfPresent(String.self, forKey: .branch),
+            summaryLabel: try? container.decodeIfPresent(String.self, forKey: .summaryLabel),
+            startedAt: try? container.decodeIfPresent(String.self, forKey: .startedAt),
+            endedAt: try? container.decodeIfPresent(String.self, forKey: .endedAt),
+            cstDay: try? container.decodeIfPresent(String.self, forKey: .cstDay),
+            durationSec: (try? container.decode(Double.self, forKey: .durationSec)) ?? 0,
+            turnCount: (try? container.decode(Int.self, forKey: .turnCount)) ?? 0,
+            totalTokens: (try? container.decode(UInt64.self, forKey: .totalTokens)) ?? 0,
+            skillsUsed: decodedSkills,
+            actionSplit: (try? container.decode(WorkStatusActionSplit.self, forKey: .actionSplit)) ?? WorkStatusActionSplit(),
+            outputs: (try? container.decode(WorkStatusSessionOutputs.self, forKey: .outputs)) ?? WorkStatusSessionOutputs()
+        )
+    }
+}
+
+public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
+    public let goalID: String
+    public let title: String
+    public let isUnassignedBucket: Bool
+    public let repo: String?
+    public let status: String
+    public let reviewRoundBadge: String?
+    public let latestActivityAt: String?
+    public let durationSec: Double
+    public let turnCount: Int
+    public let totalTokens: UInt64
+    public let skillsUsed: [WorkStatusGoalSkillTouch]
+    public let actionSplit: WorkStatusActionSplit
+    public let outputs: WorkStatusGoalOutputs
+    public let aiSignals: [WorkStatusAISignal]
+    public let sessions: [WorkStatusSessionReceipt]
+
+    public var id: String { goalID }
+
+    enum CodingKeys: String, CodingKey {
+        case goalID = "goal_id"
+        case title
+        case isUnassignedBucket = "is_unassigned_bucket"
+        case repo
+        case status
+        case reviewRoundBadge = "review_round_badge"
+        case latestActivityAt = "latest_activity_at"
+        case durationSec = "duration_sec"
+        case turnCount = "turn_count"
+        case totalTokens = "total_tokens"
+        case skillsUsed = "skills_used"
+        case actionSplit = "action_split"
+        case outputs
+        case aiSignals = "ai_signals"
+        case sessions
+    }
+
+    public init(
+        goalID: String,
+        title: String,
+        isUnassignedBucket: Bool = false,
+        repo: String? = nil,
+        status: String = "active",
+        reviewRoundBadge: String? = nil,
+        latestActivityAt: String? = nil,
+        durationSec: Double = 0,
+        turnCount: Int = 0,
+        totalTokens: UInt64 = 0,
+        skillsUsed: [WorkStatusGoalSkillTouch] = [],
+        actionSplit: WorkStatusActionSplit = WorkStatusActionSplit(),
+        outputs: WorkStatusGoalOutputs? = nil,
+        aiSignals: [WorkStatusAISignal] = [],
+        sessions: [WorkStatusSessionReceipt] = []
+    ) {
+        self.goalID = goalID
+        self.title = title
+        self.isUnassignedBucket = isUnassignedBucket
+        self.repo = repo
+        self.status = status
+        self.reviewRoundBadge = reviewRoundBadge
+        self.latestActivityAt = latestActivityAt
+        self.durationSec = max(0, durationSec)
+        self.turnCount = max(0, turnCount)
+        self.totalTokens = totalTokens
+        self.skillsUsed = skillsUsed.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        self.actionSplit = actionSplit
+        self.outputs = outputs ?? WorkStatusGoalOutputs(sessionCount: sessions.count)
+        self.aiSignals = aiSignals
+        self.sessions = sessions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let gid = (try? container.decode(String.self, forKey: .goalID)) ?? "unassigned-daily"
+        let isUnassigned = (try? container.decode(Bool.self, forKey: .isUnassignedBucket)) ?? (gid == "unassigned-daily")
+        let decodedSessions = (try? container.decode([WorkStatusSessionReceipt].self, forKey: .sessions)) ?? []
+        let decodedSkills = ((try? container.decode([WorkStatusGoalSkillTouch].self, forKey: .skillsUsed)) ?? [])
+            .filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        self.init(
+            goalID: gid,
+            title: (try? container.decode(String.self, forKey: .title)) ?? gid,
+            isUnassignedBucket: isUnassigned,
+            repo: try? container.decodeIfPresent(String.self, forKey: .repo),
+            status: (try? container.decode(String.self, forKey: .status)) ?? (isUnassigned ? "daily" : "active"),
+            reviewRoundBadge: try? container.decodeIfPresent(String.self, forKey: .reviewRoundBadge),
+            latestActivityAt: try? container.decodeIfPresent(String.self, forKey: .latestActivityAt),
+            durationSec: (try? container.decode(Double.self, forKey: .durationSec)) ?? 0,
+            turnCount: (try? container.decode(Int.self, forKey: .turnCount)) ?? 0,
+            totalTokens: (try? container.decode(UInt64.self, forKey: .totalTokens)) ?? 0,
+            skillsUsed: decodedSkills,
+            actionSplit: (try? container.decode(WorkStatusActionSplit.self, forKey: .actionSplit)) ?? WorkStatusActionSplit(),
+            outputs: (try? container.decode(WorkStatusGoalOutputs.self, forKey: .outputs))
+                ?? WorkStatusGoalOutputs(sessionCount: decodedSessions.count),
+            aiSignals: (try? container.decode([WorkStatusAISignal].self, forKey: .aiSignals)) ?? [],
+            sessions: decodedSessions
+        )
+    }
+}
+
+public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
+    public let contract: String
+    public let schemaVersion: Int
+    public let generatedAt: String?
+    public let windowCST: String
+    public let windowStart: String?
+    public let windowEnd: String?
+    public let sourceAsOf: String?
+    public let sampleSize: Int
+    public let coverageStatus: String
+    public let pulse: WorkStatusPulseSummary
+    public let goals: [WorkStatusGoalRow]
+    public let errors: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case contract
+        case schemaVersion = "schema_version"
+        case generatedAt = "generated_at"
+        case windowCST = "window_cst"
+        case windowStart = "window_start"
+        case windowEnd = "window_end"
+        case sourceAsOf = "source_as_of"
+        case sampleSize = "sample_size"
+        case coverageStatus = "coverage_status"
+        case pulse
+        case goals
+        case errors
+    }
+
+    public init(
+        contract: String = "aidash-work-status/v1",
+        schemaVersion: Int = 1,
+        generatedAt: String? = nil,
+        windowCST: String = "14d",
+        windowStart: String? = nil,
+        windowEnd: String? = nil,
+        sourceAsOf: String? = nil,
+        sampleSize: Int = 0,
+        coverageStatus: String = "unknown",
+        pulse: WorkStatusPulseSummary = WorkStatusPulseSummary(),
+        goals: [WorkStatusGoalRow] = [],
+        errors: [String] = []
+    ) {
+        self.contract = contract
+        self.schemaVersion = schemaVersion
+        self.generatedAt = generatedAt
+        self.windowCST = windowCST
+        self.windowStart = windowStart
+        self.windowEnd = windowEnd
+        self.sourceAsOf = sourceAsOf
+        self.sampleSize = max(0, sampleSize)
+        self.coverageStatus = coverageStatus
+        self.pulse = pulse
+        self.goals = goals
+        self.errors = errors
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedGoals = (try? container.decode([WorkStatusGoalRow].self, forKey: .goals)) ?? []
+        let decodedPulse = (try? container.decode(WorkStatusPulseSummary.self, forKey: .pulse))
+            ?? WorkStatusPulseSummary()
+        self.contract = (try? container.decode(String.self, forKey: .contract)) ?? "aidash-work-status/v1"
+        self.schemaVersion = (try? container.decode(Int.self, forKey: .schemaVersion)) ?? 1
+        self.generatedAt = try? container.decodeIfPresent(String.self, forKey: .generatedAt)
+        self.windowCST = (try? container.decode(String.self, forKey: .windowCST)) ?? "14d"
+        self.windowStart = try? container.decodeIfPresent(String.self, forKey: .windowStart)
+        self.windowEnd = try? container.decodeIfPresent(String.self, forKey: .windowEnd)
+        self.sourceAsOf = try? container.decodeIfPresent(String.self, forKey: .sourceAsOf)
+        self.sampleSize = max(
+            0,
+            (try? container.decode(Int.self, forKey: .sampleSize)) ?? decodedPulse.sessionsCount
+        )
+        self.coverageStatus = (try? container.decode(String.self, forKey: .coverageStatus)) ?? "unknown"
+        self.pulse = decodedPulse
+        self.goals = decodedGoals
+        self.errors = (try? container.decode([String].self, forKey: .errors)) ?? []
+    }
+}
+
+public extension WorkStatusGoalRow {
+    var isFirstPassReview: Bool {
+        let code = reviewRoundBadge?.uppercased() ?? ""
+        return code.count == 2 && code.hasPrefix("R") && code.hasSuffix("1")
+    }
+
+    var isSecondRoundReview: Bool {
+        let code = reviewRoundBadge?.uppercased() ?? ""
+        return code.count == 2 && code.hasPrefix("R") && code.hasSuffix("2")
+    }
+}
+
+public enum LiveDashboardTelemetryReaderSanitizer {
+    public static func sanitizeSummary(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let pairs: [(String, String)] = [
+            ("session" + "_id", "会话标识"),
+            ("SKILL" + ".md", "技能主文档"),
+            ("skill_contract" + ".py", "技能门禁工具"),
+            ("skill_retro" + ".py", "技能复盘工具"),
+            ("agent_retro" + ".py", "轨迹复盘工具"),
+            ("python" + "3", "脚本运行"),
+            ("inspec" + "tor", "诊断面板"),
+        ]
+        for (bad, good) in pairs {
+            cleaned = cleaned.replacingOccurrences(of: bad, with: good, options: [.caseInsensitive])
+        }
+        let codePattern = #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
+        if let regex = try? NSRegularExpression(pattern: codePattern) {
+            let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: range, withTemplate: "阶段")
+        }
+        return cleaned.isEmpty ? nil : cleaned
+    }
+}
+
 public struct AgentEfficiencyWorkbenchSnapshot: Codable, Sendable, Equatable {
     public let schemaVersion: Int
     public let windowCST: String
@@ -2748,6 +3427,7 @@ extension LiveDashboardTelemetryReader {
         public var steeringTokenShare: Double = 0
         public var skillsROI: SkillsRoiSnapshot?
         public var agentEfficiency: AgentEfficiencyWorkbenchSnapshot?
+        public var workStatus: WorkStatusWorkbenchSnapshot?
     }
 
     public static func loadLiveEfficiencySummary(homeURL: URL? = nil) -> LiveEfficiencySummary? {
@@ -2757,21 +3437,55 @@ extension LiveDashboardTelemetryReader {
         let magpieURL = home.appendingPathComponent(".config/magpie/usage.jsonl")
         let skillsURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/skills-roi.json")
         let agentEffURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/agent-efficiency.json")
+        let workStatusURL = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/work-status.json")
         let iCloudJobs = iCloudSyncRootURL(homeURL: home).appendingPathComponent("jobs/aidata-digest", isDirectory: true)
         let iCloudSkillsURL = iCloudJobs.appendingPathComponent("skills-roi.json")
         let iCloudAgentEffURL = iCloudJobs.appendingPathComponent("agent-efficiency.json")
-        let cacheKey = "\(fileCacheSignature(for: whURL))|\(fileCacheSignature(for: magpieURL))|\(fileCacheSignature(for: skillsURL))|\(fileCacheSignature(for: agentEffURL))|\(fileCacheSignature(for: iCloudSkillsURL))|\(fileCacheSignature(for: iCloudAgentEffURL))"
+        let iCloudWorkStatusURL = iCloudJobs.appendingPathComponent("work-status.json")
+        let cacheKey = [
+            fileCacheSignature(for: whURL),
+            fileCacheSignature(for: magpieURL),
+            fileCacheSignature(for: skillsURL),
+            fileCacheSignature(for: agentEffURL),
+            fileCacheSignature(for: workStatusURL),
+            fileCacheSignature(for: iCloudSkillsURL),
+            fileCacheSignature(for: iCloudAgentEffURL),
+            fileCacheSignature(for: iCloudWorkStatusURL),
+        ].joined(separator: "|")
         if cachedLiveEfficiencyKey == cacheKey, let cached = cachedLiveEfficiencySummary {
             return cached
         }
         var summary = LiveEfficiencySummary()
         summary.agentEfficiency = loadAgentEfficiencySnapshot(homeURL: home)
+        summary.workStatus = loadWorkStatusSnapshot(homeURL: home)
         populateMagpieEfficiencySummary(&summary, magpieURL: magpieURL)
         populateWarehouseReviewSummary(&summary, whURL: whURL)
         summary.skillsROI = loadSkillsRoiSnapshot(homeURL: home)
         cachedLiveEfficiencyKey = cacheKey
         cachedLiveEfficiencySummary = summary
         return summary
+    }
+
+    public static func loadWorkStatusSnapshot(homeURL: URL) -> WorkStatusWorkbenchSnapshot? {
+        let url = homeURL.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest/work-status.json")
+        let iCloudURL = iCloudSyncRootURL(homeURL: homeURL).appendingPathComponent("jobs/aidata-digest/work-status.json")
+        if let selected = selectFresherArtifactData(localURL: url, iCloudURL: iCloudURL),
+           let decoded = try? JSONDecoder().decode(WorkStatusWorkbenchSnapshot.self, from: selected.data) {
+            return decoded
+        }
+        let whURL = homeURL.appendingPathComponent("Development/AIDash/aidata/L3_merge/warehouse.db")
+        if let db = openReadOnlySQLite(path: whURL.path) {
+            defer { sqlite3_close(db) }
+            return queryFallbackWorkStatus(db: db)
+        }
+        if selectFresherArtifactData(localURL: url, iCloudURL: iCloudURL) != nil {
+            return WorkStatusWorkbenchSnapshot(
+                sampleSize: 0,
+                coverageStatus: "error",
+                errors: ["work-status.json decode failed"]
+            )
+        }
+        return nil
     }
 
     public static func loadAgentEfficiencySnapshot(homeURL: URL) -> AgentEfficiencyWorkbenchSnapshot? {
@@ -2954,6 +3668,409 @@ extension LiveDashboardTelemetryReader {
                 dailySeries: current.dailySeries,
                 agentRetro: fallbackRetro
             )
+        }
+        if summary.workStatus == nil {
+            summary.workStatus = queryFallbackWorkStatus(db: db)
+        }
+    }
+
+    private struct FallbackWorkStreamRow {
+        let sessionUID: String
+        let source: String
+        let sessionIDShort: String
+        let goalID: String
+        let isUnassigned: Bool
+        let goalTitle: String
+        let repoName: String?
+        let branchName: String?
+        let goalStatus: String
+        let reviewBadge: String?
+        let roleKey: String
+        let modelID: String?
+        let summaryLabel: String?
+        let startedAt: String?
+        let endedAt: String?
+        let durationSec: Double
+        let turnCount: Int
+        let totalTokens: UInt64
+        let skillsJSON: String
+        let searchReadCalls: Int
+        let codeEditCalls: Int
+        let verifyScriptCalls: Int
+        let spinReworkCalls: Int
+        let filesChangedCount: Int
+        let commitsCount: Int
+        let prNumber: Int?
+        let refSkillsCSV: String?
+        let scriptSkillsCSV: String?
+        let cstDay: String?
+        let windowStart: String?
+        let windowEnd: String?
+    }
+
+    private static func parseFallbackSkillList(_ jsonRaw: String) -> [String] {
+        guard let data = jsonRaw.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return [] }
+        return arr.compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0) }
+    }
+
+    private static func parseFallbackSkillCSV(_ csvRaw: String?) -> Set<String> {
+        guard let csvRaw, !csvRaw.isEmpty else { return [] }
+        return Set(
+            csvRaw.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0) }
+        )
+    }
+
+    private static func buildFallbackGoalSignals(
+        isUnassigned: Bool,
+        reviewBadge: String?,
+        split: WorkStatusActionSplit,
+        skills: [WorkStatusGoalSkillTouch],
+        filesChanged: Int,
+        prNumber: Int?
+    ) -> [WorkStatusAISignal] {
+        var out: [WorkStatusAISignal] = []
+        let emptySkills = skills.filter(\.emptyLoad).map(\.skill)
+        if !emptySkills.isEmpty {
+            let joinedZh = emptySkills.prefix(3).joined(separator: "、")
+            let joinedEn = emptySkills.prefix(3).joined(separator: ", ")
+            out.append(WorkStatusAISignal(
+                kind: "empty_skill_load",
+                severity: "warning",
+                target: "skill_owner",
+                labelZh: "技能空载提醒：\(joinedZh) 已加载但未命中参考文档或脚本",
+                labelEn: "Unused skill context: \(joinedEn) loaded without script or reference use"
+            ))
+        }
+        if split.codeEditCalls > 0 && Double(split.searchReadCalls) / Double(max(1, split.codeEditCalls)) >= 4.0 && split.searchReadCalls >= 8 {
+            let ratio = String(format: "%.1f", Double(split.searchReadCalls) / Double(max(1, split.codeEditCalls)))
+            out.append(WorkStatusAISignal(
+                kind: "high_search_to_edit",
+                severity: "info",
+                target: "context_routing",
+                labelZh: "探查阅读占比偏高（探查与编辑比 \(ratio)x），可补充上下文目录索引",
+                labelEn: "High read-to-edit ratio (\(ratio)x); consider tightening context routing"
+            ))
+        }
+        if split.spinReworkCalls > 0 {
+            out.append(WorkStatusAISignal(
+                kind: "script_or_rework_friction",
+                severity: "warning",
+                target: "tooling",
+                labelZh: "验证或脚本重试 \(split.spinReworkCalls) 次，建议收紧前置参数校验与单步验证",
+                labelEn: "Observed \(split.spinReworkCalls) verification retries; tighten preflight validation"
+            ))
+        }
+        if reviewBadge == "R3+" {
+            out.append(WorkStatusAISignal(
+                kind: "multi_round_review",
+                severity: "warning",
+                target: "spec_alignment",
+                labelZh: "多轮审查返工才收敛，建议前置对齐验收边界",
+                labelEn: "Converged after three or more review rounds; tighten upfront acceptance criteria"
+            ))
+        } else if reviewBadge == "R1" && (prNumber != nil || filesChanged > 0) && split.spinReworkCalls == 0 {
+            out.append(WorkStatusAISignal(
+                kind: "first_pass_clean",
+                severity: "positive",
+                target: "workflow",
+                labelZh: "首轮审查一次通过，探查与编码节奏均衡",
+                labelEn: "Clean first-pass delivery with balanced read-edit-verify flow"
+            ))
+        }
+        if out.isEmpty && !isUnassigned && filesChanged > 0 {
+            out.append(WorkStatusAISignal(
+                kind: "steady_delivery",
+                severity: "positive",
+                target: "workflow",
+                labelZh: "交付链路平稳，无空载技能或脚本阻塞",
+                labelEn: "Steady delivery with no empty skill loads or script blockers"
+            ))
+        }
+        return Array(out.prefix(5))
+    }
+
+    // swiftlint:disable:next function_body_length
+    private static func queryFallbackWorkStatus(db: OpaquePointer) -> WorkStatusWorkbenchSnapshot? {
+        guard let hasTable = sqliteTableExists(db, name: "fact_session_work_summary") else {
+            return WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "error")
+        }
+        guard hasTable else {
+            return WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "missing")
+        }
+        let hasDimGoal = sqliteTableExists(db, name: "dim_goal") == true
+        let hasTaskRun = sqliteTableExists(db, name: "fact_gtt_task_run") == true
+        let hasRefHits = sqliteTableExists(db, name: "reference_hits") == true
+        let hasScriptCall = sqliteTableExists(db, name: "script_call") == true
+        let goalCTE = hasDimGoal
+            ? """
+            SELECT g.goal_id, g.title, COALESCE(NULLIF(g.derived_actual_status, ''), NULLIF(g.static_header_status, ''), 'active') AS goal_status,
+                   ROW_NUMBER() OVER (PARTITION BY g.goal_id ORDER BY COALESCE(g.last_event_at, '') DESC, g.goal_uid DESC) AS rn
+            FROM dim_goal AS g
+            """
+            : "SELECT '' AS goal_id, '' AS title, 'active' AS goal_status, 1 AS rn WHERE 0"
+        let roundCTE = hasTaskRun
+            ? """
+            SELECT tr.goal_id,
+                   MAX(CASE WHEN tr.round_no IS NULL OR tr.round_no < 1 OR tr.round_no = 10 THEN 1 ELSE tr.round_no END) AS max_round,
+                   MAX(CASE WHEN (tr.round_no IS NULL OR tr.round_no IN (1, 10)) AND (UPPER(COALESCE(tr.v5_verdict, '')) = 'FAIL' OR LOWER(COALESCE(tr.status, '')) = 'failed') THEN 1 ELSE 0 END) AS had_r1_fail
+            FROM fact_gtt_task_run AS tr WHERE tr.goal_id IS NOT NULL AND tr.goal_id != '' GROUP BY tr.goal_id
+            """
+            : "SELECT '' AS goal_id, 1 AS max_round, 0 AS had_r1_fail WHERE 0"
+        let refCTE = hasRefHits
+            ? """
+            SELECT LOWER(SUBSTR(r.session_id, 1, 8)) AS sid, COUNT(DISTINCT r.hit_uid) AS cnt, GROUP_CONCAT(DISTINCT r.skill) AS csv
+            FROM reference_hits AS r CROSS JOIN bounds AS b
+            WHERE r.session_id IS NOT NULL AND LENGTH(r.session_id) >= 8 AND (r.cst_day IS NULL OR r.cst_day BETWEEN b.start_day AND b.end_day)
+            GROUP BY LOWER(SUBSTR(r.session_id, 1, 8))
+            """
+            : "SELECT '' AS sid, 0 AS cnt, NULL AS csv WHERE 0"
+        let scrCTE = hasScriptCall
+            ? """
+            SELECT LOWER(SUBSTR(sc.session_id, 1, 8)) AS sid, COUNT(DISTINCT sc.call_uid) AS cnt,
+                   SUM(CASE WHEN sc.exit_code IS NOT NULL AND sc.exit_code != 0 THEN 1 ELSE 0 END) AS fail_cnt, GROUP_CONCAT(DISTINCT sc.skill) AS csv
+            FROM script_call AS sc CROSS JOIN bounds AS b
+            WHERE sc.session_id IS NOT NULL AND LENGTH(sc.session_id) >= 8 AND (sc.cst_day IS NULL OR sc.cst_day BETWEEN b.start_day AND b.end_day)
+            GROUP BY LOWER(SUBSTR(sc.session_id, 1, 8))
+            """
+            : "SELECT '' AS sid, 0 AS cnt, 0 AS fail_cnt, NULL AS csv WHERE 0"
+
+        let sql = """
+        WITH anchor AS (
+            SELECT COALESCE((SELECT MAX(s.cst_day) FROM fact_session_work_summary AS s WHERE s.cst_day IS NOT NULL), date('now', '+8 hours')) AS end_day
+        ),
+        bounds AS (
+            SELECT date(a.end_day, '-13 days') AS start_day, a.end_day AS end_day FROM anchor AS a
+        ),
+        latest_goals AS (\(goalCTE)),
+        goal_rounds AS (\(roundCTE)),
+        ref_t AS (\(refCTE)),
+        scr_t AS (\(scrCTE))
+        SELECT
+            s.session_uid, COALESCE(s.source, 'copilot_cli'), COALESCE(s.session_id_short, '00000000'),
+            COALESCE(NULLIF(s.goal_id, ''), 'unassigned-daily') AS gid,
+            CASE WHEN s.goal_id IS NULL OR s.goal_id = '' THEN 1 ELSE 0 END AS unass,
+            CASE WHEN s.goal_id IS NULL OR s.goal_id = '' THEN '日常独立会话（未绑定独立 Goal）' ELSE COALESCE(NULLIF(lg.title, ''), s.goal_id) END,
+            s.repo_name, s.branch_name,
+            CASE WHEN s.goal_id IS NULL OR s.goal_id = '' THEN 'daily' ELSE COALESCE(lg.goal_status, 'active') END,
+            CASE WHEN s.goal_id IS NULL OR s.goal_id = '' OR gr.max_round IS NULL THEN NULL
+                 WHEN gr.max_round >= 3 THEN 'R3+' WHEN gr.max_round = 2 OR gr.had_r1_fail = 1 THEN 'R2' ELSE 'R1' END,
+            COALESCE(s.role_key, 'writer'), s.model_id, s.summary_label, s.started_at, s.ended_at,
+            COALESCE(s.duration_sec, 0.0), COALESCE(s.turn_count, 0), COALESCE(s.total_tokens, 0), COALESCE(s.skills_json, '[]'),
+            MAX(COALESCE(s.search_read_calls, 0), COALESCE(rt.cnt, 0)),
+            COALESCE(s.code_edit_calls, 0),
+            MAX(COALESCE(s.verify_script_calls, 0), COALESCE(st.cnt, 0)),
+            MAX(COALESCE(s.spin_rework_calls, 0), COALESCE(st.fail_cnt, 0)),
+            COALESCE(s.files_changed_count, 0), COALESCE(s.commits_count, 0), s.pr_number,
+            rt.csv, st.csv, s.cst_day, b.start_day, b.end_day
+        FROM fact_session_work_summary AS s
+        CROSS JOIN bounds AS b
+        LEFT JOIN latest_goals AS lg ON lg.goal_id = COALESCE(NULLIF(s.goal_id, ''), 'unassigned-daily') AND lg.rn = 1
+        LEFT JOIN goal_rounds AS gr ON gr.goal_id = COALESCE(NULLIF(s.goal_id, ''), 'unassigned-daily')
+        LEFT JOIN ref_t AS rt ON rt.sid = LOWER(s.session_id_short)
+        LEFT JOIN scr_t AS st ON st.sid = LOWER(s.session_id_short)
+        WHERE s.cst_day BETWEEN b.start_day AND b.end_day;
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "error")
+        }
+        defer { sqlite3_finalize(stmt) }
+        var rows: [FallbackWorkStreamRow] = []
+        while true {
+            let rc = sqlite3_step(stmt)
+            if rc == SQLITE_DONE { break }
+            guard rc == SQLITE_ROW else { return WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "error") }
+            let prCol = sqlite3_column_type(stmt, 25) == SQLITE_NULL ? nil : Int(sqlite3_column_int64(stmt, 25))
+            rows.append(FallbackWorkStreamRow(
+                sessionUID: sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "",
+                source: sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "copilot_cli",
+                sessionIDShort: String((sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "00000000").prefix(8)),
+                goalID: sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "unassigned-daily",
+                isUnassigned: sqlite3_column_int64(stmt, 4) != 0,
+                goalTitle: sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "",
+                repoName: sqlite3_column_text(stmt, 6).map { String(cString: $0) },
+                branchName: sqlite3_column_text(stmt, 7).map { String(cString: $0) },
+                goalStatus: sqlite3_column_text(stmt, 8).map { String(cString: $0) } ?? "active",
+                reviewBadge: sqlite3_column_text(stmt, 9).map { String(cString: $0) },
+                roleKey: sqlite3_column_text(stmt, 10).map { String(cString: $0) } ?? "writer",
+                modelID: sqlite3_column_text(stmt, 11).map { String(cString: $0) },
+                summaryLabel: sqlite3_column_text(stmt, 12).map { String(cString: $0) },
+                startedAt: sqlite3_column_text(stmt, 13).map { String(cString: $0) },
+                endedAt: sqlite3_column_text(stmt, 14).map { String(cString: $0) },
+                durationSec: max(0, sqlite3_column_double(stmt, 15)),
+                turnCount: max(0, Int(sqlite3_column_int64(stmt, 16))),
+                totalTokens: UInt64(max(0, sqlite3_column_int64(stmt, 17))),
+                skillsJSON: sqlite3_column_text(stmt, 18).map { String(cString: $0) } ?? "[]",
+                searchReadCalls: max(0, Int(sqlite3_column_int64(stmt, 19))),
+                codeEditCalls: max(0, Int(sqlite3_column_int64(stmt, 20))),
+                verifyScriptCalls: max(0, Int(sqlite3_column_int64(stmt, 21))),
+                spinReworkCalls: max(0, Int(sqlite3_column_int64(stmt, 22))),
+                filesChangedCount: max(0, Int(sqlite3_column_int64(stmt, 23))),
+                commitsCount: max(0, Int(sqlite3_column_int64(stmt, 24))),
+                prNumber: prCol.flatMap { $0 > 0 ? $0 : nil },
+                refSkillsCSV: sqlite3_column_text(stmt, 26).map { String(cString: $0) },
+                scriptSkillsCSV: sqlite3_column_text(stmt, 27).map { String(cString: $0) },
+                cstDay: sqlite3_column_text(stmt, 28).map { String(cString: $0) },
+                windowStart: sqlite3_column_text(stmt, 29).map { String(cString: $0) },
+                windowEnd: sqlite3_column_text(stmt, 30).map { String(cString: $0) }
+            ))
+        }
+        return assembleFallbackWorkStatus(rows: rows)
+    }
+
+    // swiftlint:disable:next function_body_length
+    private static func assembleFallbackWorkStatus(rows: [FallbackWorkStreamRow]) -> WorkStatusWorkbenchSnapshot {
+        guard !rows.isEmpty else {
+            return WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "unknown")
+        }
+        struct GoalAccum {
+            var goalID: String
+            var title: String
+            var isUnassigned: Bool
+            var repo: String?
+            var status: String
+            var reviewBadge: String?
+            var latestTS: String = ""
+            var durationSec: Double = 0
+            var turnCount: Int = 0
+            var totalTokens: UInt64 = 0
+            var sr: Int = 0, ce: Int = 0, vs: Int = 0, sw: Int = 0
+            var files: Int = 0, commits: Int = 0
+            var prNumber: Int?
+            var skillsTouch: [String: (loads: Int, refs: Int, scripts: Int)] = [:]
+            var sessions: [WorkStatusSessionReceipt] = []
+        }
+        var byGoal: [String: GoalAccum] = [:]
+        var asOfMax: String?
+        for r in rows {
+            if let d = r.cstDay, asOfMax == nil || d > (asOfMax ?? "") { asOfMax = d }
+            var g = byGoal[r.goalID] ?? GoalAccum(
+                goalID: r.goalID, title: r.goalTitle, isUnassigned: r.isUnassigned,
+                repo: r.repoName, status: r.goalStatus, reviewBadge: r.reviewBadge
+            )
+            if g.repo == nil, let rn = r.repoName, !rn.isEmpty { g.repo = rn }
+            g.durationSec += r.durationSec
+            g.turnCount = saturatingAddInt(g.turnCount, r.turnCount)
+            g.totalTokens = saturatingAddUInt64(g.totalTokens, r.totalTokens)
+            g.sr = saturatingAddInt(g.sr, r.searchReadCalls)
+            g.ce = saturatingAddInt(g.ce, r.codeEditCalls)
+            g.vs = saturatingAddInt(g.vs, r.verifyScriptCalls)
+            g.sw = saturatingAddInt(g.sw, r.spinReworkCalls)
+            g.files = saturatingAddInt(g.files, r.filesChangedCount)
+            g.commits = saturatingAddInt(g.commits, r.commitsCount)
+            if let pr = r.prNumber, g.prNumber == nil || pr > (g.prNumber ?? 0) { g.prNumber = pr }
+            let ts = r.endedAt ?? r.startedAt ?? ""
+            if ts > g.latestTS { g.latestTS = ts }
+
+            let refSet = parseFallbackSkillCSV(r.refSkillsCSV)
+            let scrSet = parseFallbackSkillCSV(r.scriptSkillsCSV)
+            let allSk = (Set(parseFallbackSkillList(r.skillsJSON)).union(refSet).union(scrSet)).sorted()
+            var sessSkills: [WorkStatusSessionSkillTouch] = []
+            for sk in allSk {
+                let uRef = refSet.contains(sk), uScr = scrSet.contains(sk)
+                sessSkills.append(WorkStatusSessionSkillTouch(skill: sk, usedReference: uRef, usedScript: uScr))
+                var cur = g.skillsTouch[sk] ?? (0, 0, 0)
+                cur.loads += 1
+                if uRef { cur.refs += 1 }
+                if uScr { cur.scripts += 1 }
+                g.skillsTouch[sk] = cur
+            }
+            let rKey = r.roleKey.lowercased()
+            g.sessions.append(WorkStatusSessionReceipt(
+                sessionUID: r.sessionUID, sessionIDShort: r.sessionIDShort, source: r.source,
+                roleKey: rKey, roleLabelZh: fallbackPlainRoleZh(for: rKey), roleLabelEn: fallbackPlainRoleEn(for: rKey),
+                modelID: r.modelID, branch: r.branchName, summaryLabel: r.summaryLabel,
+                startedAt: r.startedAt, endedAt: r.endedAt, cstDay: r.cstDay,
+                durationSec: r.durationSec, turnCount: r.turnCount, totalTokens: r.totalTokens,
+                skillsUsed: sessSkills,
+                actionSplit: WorkStatusActionSplit(
+                    searchReadCalls: r.searchReadCalls, codeEditCalls: r.codeEditCalls,
+                    verifyScriptCalls: r.verifyScriptCalls, spinReworkCalls: r.spinReworkCalls
+                ),
+                outputs: WorkStatusSessionOutputs(filesChangedCount: r.filesChangedCount, commitsCount: r.commitsCount, prNumber: r.prNumber)
+            ))
+            byGoal[r.goalID] = g
+        }
+        let sortedGoals = byGoal.values.sorted {
+            if $0.latestTS != $1.latestTS { return $0.latestTS > $1.latestTS }
+            return (!$0.isUnassigned ? 1 : 0) > (!$1.isUnassigned ? 1 : 0)
+        }
+        var goalsOut: [WorkStatusGoalRow] = []
+        var grandDur = 0.0, grandTok: UInt64 = 0, grandFiles = 0, grandCommits = 0
+        var grandSR = 0, grandCE = 0, grandVS = 0, grandSW = 0, activeGoals = 0
+        var prsSeen: Set<String> = []
+        for g in sortedGoals {
+            let sessSorted = g.sessions.sorted { ($0.endedAt ?? $0.startedAt ?? "") > ($1.endedAt ?? $1.startedAt ?? "") }
+            let skillsOut = g.skillsTouch.keys.sorted().compactMap { sk -> WorkStatusGoalSkillTouch? in
+                guard let st = g.skillsTouch[sk] else { return nil }
+                return WorkStatusGoalSkillTouch(skill: sk, sessionLoads: st.loads, referenceSessions: st.refs, scriptSessions: st.scripts)
+            }
+            let split = WorkStatusActionSplit(searchReadCalls: g.sr, codeEditCalls: g.ce, verifyScriptCalls: g.vs, spinReworkCalls: g.sw)
+            let sigs = buildFallbackGoalSignals(
+                isUnassigned: g.isUnassigned, reviewBadge: g.reviewBadge, split: split,
+                skills: skillsOut, filesChanged: g.files, prNumber: g.prNumber
+            )
+            if !g.isUnassigned { activeGoals += 1 }
+            grandDur += g.durationSec
+            grandTok = saturatingAddUInt64(grandTok, g.totalTokens)
+            grandFiles = saturatingAddInt(grandFiles, g.files)
+            grandCommits = saturatingAddInt(grandCommits, g.commits)
+            if let pr = g.prNumber { prsSeen.insert("\(g.repo ?? g.goalID)#\(pr)") }
+            grandSR = saturatingAddInt(grandSR, g.sr)
+            grandCE = saturatingAddInt(grandCE, g.ce)
+            grandVS = saturatingAddInt(grandVS, g.vs)
+            grandSW = saturatingAddInt(grandSW, g.sw)
+            goalsOut.append(WorkStatusGoalRow(
+                goalID: g.goalID, title: g.title, isUnassignedBucket: g.isUnassigned, repo: g.repo,
+                status: g.status, reviewRoundBadge: g.reviewBadge, latestActivityAt: g.latestTS.isEmpty ? nil : g.latestTS,
+                durationSec: (g.durationSec * 10).rounded() / 10, turnCount: g.turnCount, totalTokens: g.totalTokens,
+                skillsUsed: skillsOut, actionSplit: split,
+                outputs: WorkStatusGoalOutputs(filesChangedCount: g.files, commitsCount: g.commits, prNumber: g.prNumber, sessionCount: sessSorted.count),
+                aiSignals: sigs, sessions: sessSorted
+            ))
+        }
+        let cov = (grandTok == 0 && (grandSR + grandCE + grandVS + grandSW) == 0) ? "partial" : "healthy"
+        let pulse = WorkStatusPulseSummary(
+            goalsCount: activeGoals, bucketsCount: goalsOut.count, sessionsCount: rows.count,
+            durationSec: (grandDur * 10).rounded() / 10, totalTokens: grandTok,
+            filesChangedCount: grandFiles, commitsCount: grandCommits, prsTouchedCount: prsSeen.count,
+            actionSplit: WorkStatusActionSplit(searchReadCalls: grandSR, codeEditCalls: grandCE, verifyScriptCalls: grandVS, spinReworkCalls: grandSW)
+        )
+        return WorkStatusWorkbenchSnapshot(
+            windowCST: "14d", windowStart: rows.first?.windowStart, windowEnd: rows.first?.windowEnd,
+            sourceAsOf: asOfMax, sampleSize: rows.count, coverageStatus: cov, pulse: pulse, goals: goalsOut
+        )
+    }
+
+    private static func fallbackPlainRoleZh(for key: String) -> String {
+        switch key {
+        case "m3": return "总控协调"
+        case "m2": return "话题编排"
+        case "m1": return "主控编排"
+        case "designer": return "视觉设计"
+        case "writer": return "编码实现"
+        case "reviewer": return "独立审查"
+        case "explorer": return "代码探查"
+        case "pr_monitor": return "交付监控"
+        default: return key
+        }
+    }
+
+    private static func fallbackPlainRoleEn(for key: String) -> String {
+        switch key {
+        case "m3": return "Top-Level Coordinator"
+        case "m2": return "Topic Dispatcher"
+        case "m1": return "Goal Lead"
+        case "designer": return "Visual Designer"
+        case "writer": return "Code Implementation"
+        case "reviewer": return "Independent Reviewer"
+        case "explorer": return "Code Explorer"
+        case "pr_monitor": return "Delivery Monitor"
+        default: return key
         }
     }
 

@@ -124,9 +124,14 @@ public struct AIDashTwoTabPreviewHostBoard: View {
     }
 
     private var descriptors: [PreviewVariantDescriptor] {
-        activeTab == .overview
-            ? Tab1QuotasAndAgentEfficiencySections.descriptors
-            : Tab2SkillsArsenalInspectorSections.descriptors
+        switch activeTab {
+        case .overview:
+            return Tab1QuotasAndAgentEfficiencySections.descriptors
+        case .goalWorkStream:
+            return Tab3GoalWorkStreamSections.descriptors
+        default:
+            return Tab2SkillsArsenalInspectorSections.descriptors
+        }
     }
 
     public var body: some View {
@@ -157,8 +162,8 @@ public struct AIDashTwoTabPreviewHostBoard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("AIDash PreviewHost · 大白话基本盘与趋势总看板").font(.title3.weight(.bold))
-                    Text("Native 120Hz · 2 × 10 时间趋势对比画廊 · 单卡响应隔离").font(.caption).foregroundStyle(.secondary)
+                    Text("AIDash PreviewHost · 三段式工作台与趋势探索画廊").font(.title3.weight(.bold))
+                    Text("Native 120Hz · 总览与进化 · Goal 与工作流 (2+1+1) · Skills 武器库").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 PreviewSelectionSummaryPill(receiptWriter: receiptWriter)
@@ -184,12 +189,17 @@ public struct AIDashTwoTabPreviewHostBoard: View {
             HStack(spacing: 8) {
                 tabButton(
                     .overview,
-                    title: "Tab 1 · Agent 总看板（基本盘 + 时间趋势）",
+                    title: "总览与进化",
                     count: Tab1QuotasAndAgentEfficiencySections.descriptors.count
                 )
                 tabButton(
+                    .goalWorkStream,
+                    title: "Goal 与工作流 (2+1+1)",
+                    count: Tab3GoalWorkStreamSections.descriptors.count
+                )
+                tabButton(
                     .agentEfficiency,
-                    title: "Tab 2 · Skills 基本盘与演进趋势（24 个家底）",
+                    title: "Skills 武器库",
                     count: Tab2SkillsArsenalInspectorSections.descriptors.count
                 )
                 Spacer()
@@ -251,15 +261,18 @@ public struct AIDashTwoTabPreviewHostBoard: View {
 
     @ViewBuilder
     private func sectionView(for descriptor: PreviewVariantDescriptor) -> some View {
-        if descriptor.tab == .overview {
+        switch descriptor.tab {
+        case .overview:
             Tab1QuotasAndAgentEfficiencySections.view(for: descriptor, data: data, globalExpandAll: expandAll, speed: speed)
-        } else {
+        case .goalWorkStream:
+            Tab3GoalWorkStreamSections.view(for: descriptor, data: data, globalExpandAll: expandAll, speed: speed)
+        default:
             Tab2SkillsArsenalInspectorSections.view(for: descriptor, data: data, globalExpandAll: expandAll, speed: speed)
         }
     }
 }
 
-#Preview("2 × 10 PreviewHost") {
+#Preview("3-Section PreviewHost") {
     AIDashTwoTabPreviewHostBoard(data: .fallback())
 }
 #endif

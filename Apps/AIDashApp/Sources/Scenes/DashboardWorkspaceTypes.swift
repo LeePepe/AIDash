@@ -40,6 +40,7 @@ public enum DashboardTokenFormatter {
 
 public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable, Identifiable {
     case overview
+    case goalWorkStream
     case scheduledPulse
     case agentEfficiency
     case actionItems
@@ -47,7 +48,7 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
     case settings
 
     public static var primaryNavigationSections: [DashboardWorkspaceSection] {
-        [.overview, .agentEfficiency]
+        [.overview, .goalWorkStream, .agentEfficiency]
     }
 
     public var id: String { rawValue }
@@ -57,14 +58,19 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
         case .overview:
             return DashboardL10n.tr(
                 "dashboard.section.tab1_quotas_efficiency",
-                "Agent 总看板"
+                "总览与进化"
+            )
+        case .goalWorkStream:
+            return DashboardL10n.tr(
+                "dashboard.section.tab2_goal_work_stream",
+                "Goal 与工作流"
             )
         case .scheduledPulse:
             return DashboardL10n.tr("dashboard.section.scheduled_pulse", "Scheduled Pulse")
         case .agentEfficiency:
             return DashboardL10n.tr(
                 "dashboard.section.tab2_skills_arsenal",
-                "Skills 基本盘与趋势"
+                "Skills 武器库"
             )
         case .actionItems:
             return DashboardL10n.tr("dashboard.section.action_items", "Actionable Items")
@@ -78,6 +84,7 @@ public enum DashboardWorkspaceSection: String, CaseIterable, Sendable, Equatable
     public var symbolName: String {
         switch self {
         case .overview: return "gauge.with.dots.needle.67percent"
+        case .goalWorkStream: return "point.3.connected.trianglepath.dotted"
         case .scheduledPulse: return "clock.badge.checkmark"
         case .agentEfficiency: return "sparkles.rectangle.stack"
         case .actionItems: return "checklist"
