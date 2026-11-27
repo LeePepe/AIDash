@@ -100,7 +100,7 @@ public struct ContainerStyleBarModifier: ViewModifier {
     /// The style whose signal the bar carries. `nil` (or `.neutral`, which
     /// resolves no stripe color) draws nothing.
     public let style: CardStyle?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(style: CardStyle?) {
         self.style = style

@@ -225,7 +225,7 @@
         let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
         @State private var lens: SkillsRoiLens
         @State private var showingMetadata = false
-        @Environment(\.theme) private var theme
+        private let theme = Theme.system
         @State private var inspectorFilter: SkillInspectorFilter
         @State private var evolutionFilter: SkillVersionEvolutionFilter
         @State private var showAllUsageSkills = false
@@ -1718,12 +1718,12 @@
 
     private struct SkillHealthSheet: View {
         @Environment(\.dismiss) private var dismiss
-        @Environment(\.theme) private var theme
+        private let theme = Theme.system
         let detail: SkillInspectorDetail
         let report: SkillsRoiReport?
 
         private struct ScriptRow: View {
-            @Environment(\.theme) private var theme
+            private let theme = Theme.system
             let script: SkillScriptDetail
 
             private var scriptName: String {
@@ -1750,7 +1750,7 @@
         }
 
         private struct ReferenceRow: View {
-            @Environment(\.theme) private var theme
+            private let theme = Theme.system
             let reference: SkillReferenceDetail
 
             private var statusLabel: String {

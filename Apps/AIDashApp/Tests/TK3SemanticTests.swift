@@ -757,8 +757,13 @@ struct TK3SemanticTests {
         for lens in SkillsRoiLens.allCases {
             let recorder = DashboardGeometryRecorder()
             let view = SkillsRoiDiagnosticsCardView(summary: summary, initialLens: lens)
-                .frame(width: 1080).environment(\.colorScheme, .dark).environment(\.theme, Theme(isDark: true)).environment(\.dashboardGeometryRecorder, recorder)
-            let hostingView = NSHostingView(rootView: AnyView(view)); hostingView.frame = NSRect(x: 0, y: 0, width: 1080, height: 960); hostingView.layoutSubtreeIfNeeded()
+                .frame(width: 1080)
+                .environment(\.colorScheme, .dark)
+                .environment(\.dashboardGeometryRecorder, recorder)
+            let hostingView = NSHostingView(rootView: AnyView(view))
+            hostingView.appearance = NSAppearance(named: .darkAqua)
+            hostingView.frame = NSRect(x: 0, y: 0, width: 1080, height: 960)
+            hostingView.layoutSubtreeIfNeeded()
             let strings = collectAccessibilityStrings(from: hostingView).joined(separator: " ")
             #expect(!strings.contains("python3")); #expect(!strings.contains("session_id")); #expect(!strings.contains("SKILL.md")); #expect(!strings.contains("inspector")); #expect(!strings.contains("L0")); #expect(!strings.contains("L1")); #expect(!strings.contains("L2")); #expect(!strings.contains("L3"))
             let ids = Set(recorder.samples.map(\.id)); #expect(!ids.contains("skills-four-layer-pulse")); #expect(!ids.contains("skills-inspector-detail")); #expect(!ids.contains("inspector-file-skill-md")); #expect(!ids.contains("skills-primary-detail"))
@@ -1012,14 +1017,18 @@ struct TK3SnapshotRenderTests {
         let maxY = max(controls.map(\.frame.maxY).max() ?? 0, pulseHost.hostingView.fittingSize.height)
         #expect(maxY >= viewport.height * 0.60)
 
-        let renderer = ImageRenderer(content: AnyView(
-            ScheduledPulsePageView(store: store, registerJobs: {})
-                .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
-                .environment(\.colorScheme, .dark)
-                .environment(\.theme, Theme(isDark: true))
-        ))
-        renderer.scale = 1
-        let image = try #require(renderer.nsImage)
+        let darkAqua = try #require(NSAppearance(named: .darkAqua))
+        var pulseImage: NSImage?
+        darkAqua.performAsCurrentDrawingAppearance {
+            let renderer = ImageRenderer(content: AnyView(
+                ScheduledPulsePageView(store: store, registerJobs: {})
+                    .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
+                    .environment(\.colorScheme, .dark)
+            ))
+            renderer.scale = 1
+            pulseImage = renderer.nsImage
+        }
+        let image = try #require(pulseImage)
         let tiff = try #require(image.tiffRepresentation)
         let rep = try #require(NSBitmapImageRep(data: tiff))
         #expect(rep.pixelsWide == Int(viewport.width))
@@ -1094,7 +1103,6 @@ struct TK3SnapshotRenderTests {
             }
             .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
             .environment(\.colorScheme, .dark)
-            .environment(\.theme, Theme(isDark: true))
             .environment(\.dashboardGeometryRecorder, recorder)
             .coordinateSpace(name: "tk3-geometry")
         )
@@ -1152,7 +1160,6 @@ struct TK3SnapshotRenderTests {
         let root = AnyView(
             ScheduledPulsePageView(store: store, registerJobs: {})
                 .environment(\.colorScheme, scheme)
-                .environment(\.theme, Theme(isDark: scheme == .dark))
         )
         let hostingView = NSHostingView(rootView: root)
         let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
@@ -1337,10 +1344,22 @@ struct TK3SnapshotRenderTests {
 
     private func render<V: View>(_ view: V, name: String, width: CGFloat, scheme: ColorScheme, output: URL, geometrySamples: inout [DashboardGeometrySample]) throws {
         let recorder = DashboardGeometryRecorder()
-        let host = view.frame(width: width, alignment: .topLeading).padding(20).fixedSize(horizontal: false, vertical: true).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme).environment(\.theme, Theme(isDark: scheme == .dark)).environment(\.dashboardGeometryRecorder, recorder).coordinateSpace(name: "tk3-geometry")
-        let renderer = ImageRenderer(content: host)
-        renderer.scale = 2
-        let image = try #require(renderer.nsImage)
+        let appearance = try #require(NSAppearance(named: scheme == .dark ? .darkAqua : .aqua))
+        let host = view
+            .frame(width: width, alignment: .topLeading)
+            .padding(20)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(Theme.system.neutrals.bg)
+            .environment(\.colorScheme, scheme)
+            .environment(\.dashboardGeometryRecorder, recorder)
+            .coordinateSpace(name: "tk3-geometry")
+        var renderedImage: NSImage?
+        appearance.performAsCurrentDrawingAppearance {
+            let renderer = ImageRenderer(content: host)
+            renderer.scale = 2
+            renderedImage = renderer.nsImage
+        }
+        let image = try #require(renderedImage)
         let tiff = try #require(image.tiffRepresentation)
         let rep = try #require(NSBitmapImageRep(data: tiff))
         let png = try #require(rep.representation(using: .png, properties: [:]))
@@ -1353,6 +1372,7 @@ struct TK3SnapshotRenderTests {
         }
         if name.hasPrefix("skills-") {
             let hostingView = NSHostingView(rootView: AnyView(host))
+            hostingView.appearance = appearance
             hostingView.frame = NSRect(x: 0, y: 0, width: width + 40, height: 1400)
             hostingView.layoutSubtreeIfNeeded()
             let accessibilityText = collectAccessibilityStrings(from: hostingView).joined(separator: " ")
@@ -1406,11 +1426,11 @@ struct TK3SnapshotRenderTests {
             SkillsRoiDiagnosticsCardView(summary: summary, initialSelectedSkill: "team-lead")
                 .frame(width: 720, alignment: .topLeading)
                 .environment(\.colorScheme, .dark)
-                .environment(\.theme, Theme(isDark: true))
                 .environment(\.dashboardGeometryRecorder, recorder)
                 .coordinateSpace(name: "tk3-geometry")
         )
         let hostingView = NSHostingView(rootView: root)
+        hostingView.appearance = NSAppearance(named: .darkAqua)
         let window = NSWindow(
             contentRect: NSRect(x: -10_000, y: -10_000, width: 760, height: 900),
             styleMask: [.titled],
@@ -1515,15 +1535,19 @@ struct TK3SnapshotRenderTests {
 
         for (name, sample) in [("populated", populated), ("partial", partial), ("empty", empty), ("degraded", degraded)] {
             for scheme in [ColorScheme.light, ColorScheme.dark] {
+                let appearance = try #require(NSAppearance(named: scheme == .dark ? .darkAqua : .aqua))
                 let root = AgentRetroTrajectoryPanelsView(retro: sample)
                     .frame(width: 920, alignment: .topLeading)
                     .padding(16)
-                    .background(Color(nsColor: .windowBackgroundColor))
+                    .background(Theme.system.neutrals.card)
                     .environment(\.colorScheme, scheme)
-                    .environment(\.theme, Theme(isDark: scheme == .dark))
-                let renderer = ImageRenderer(content: root)
-                renderer.scale = 2
-                let image = try #require(renderer.nsImage)
+                var renderedImage: NSImage?
+                appearance.performAsCurrentDrawingAppearance {
+                    let renderer = ImageRenderer(content: root)
+                    renderer.scale = 2
+                    renderedImage = renderer.nsImage
+                }
+                let image = try #require(renderedImage)
                 let tiff = try #require(image.tiffRepresentation)
                 let rep = try #require(NSBitmapImageRep(data: tiff))
                 let png = try #require(rep.representation(using: .png, properties: [:]))
@@ -1531,6 +1555,7 @@ struct TK3SnapshotRenderTests {
                 try png.write(to: outputDir.appendingPathComponent("panel-\(name)-\(scheme == .dark ? "dark" : "light").png"))
 
                 let hosting = NSHostingView(rootView: root)
+                hosting.appearance = appearance
                 hosting.frame = NSRect(x: 0, y: 0, width: 960, height: 600)
                 hosting.layoutSubtreeIfNeeded()
                 let axText = collectAccessibilityStrings(from: hosting).joined(separator: " ")
@@ -1625,8 +1650,8 @@ struct TK3SnapshotRenderTests {
             rootView: GoalWorkStreamWorkbenchView(summary: summary)
                 .frame(width: 1080)
                 .environment(\.colorScheme, .dark)
-                .environment(\.theme, Theme(isDark: true))
         )
+        workbenchHosting.appearance = NSAppearance(named: .darkAqua)
         workbenchHosting.frame = NSRect(x: 0, y: 0, width: 1080, height: 760)
         workbenchHosting.layoutSubtreeIfNeeded()
         let wbAX = collectAccessibilityStrings(from: workbenchHosting).joined(separator: " ")
@@ -1638,8 +1663,8 @@ struct TK3SnapshotRenderTests {
                 presentation: SessionReceiptPresentation(goalTitle: goal.title, goalRepo: goal.repo, session: sess)
             )
             .environment(\.colorScheme, .dark)
-            .environment(\.theme, Theme(isDark: true))
         )
+        sheetHosting.appearance = NSAppearance(named: .darkAqua)
         sheetHosting.frame = NSRect(x: 0, y: 0, width: 580, height: 430)
         sheetHosting.layoutSubtreeIfNeeded()
         let sheetAX = collectAccessibilityStrings(from: sheetHosting).joined(separator: " ")

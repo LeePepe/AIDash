@@ -23,7 +23,7 @@ public enum AgentRetroWatermarkFilter: String, CaseIterable, Identifiable, Senda
 public struct AgentRetroTrajectoryPanelsView: View {
     public let retro: AgentRetroWorkbenchSummary?
     @State private var retroFilter: AgentRetroWatermarkFilter = .all
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.locale) private var locale
 
     public init(retro: AgentRetroWorkbenchSummary?) {
@@ -113,7 +113,7 @@ public struct AgentRetroTrajectoryPanelsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .accessibilityIdentifier("dashboard.agentRetroEmptyCard")
         .accessibilityElement(children: .combine)
@@ -163,7 +163,7 @@ public struct AgentRetroTrajectoryPanelsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -179,7 +179,7 @@ public struct AgentRetroSixLayerPanelView: View {
     public let retro: AgentRetroWorkbenchSummary
     @Binding public var filter: AgentRetroWatermarkFilter
     public let locale: Locale
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(
         retro: AgentRetroWorkbenchSummary,
@@ -271,7 +271,7 @@ public struct AgentRetroSixLayerPanelView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .accessibilityIdentifier("dashboard.agentRetroSixLayerPanel")
     }
@@ -414,7 +414,7 @@ public struct AgentRetroSixLayerPanelView: View {
 public struct AgentHorizonWastePanelView: View {
     public let retro: AgentRetroWorkbenchSummary
     public let locale: Locale
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(retro: AgentRetroWorkbenchSummary, locale: Locale = .current) {
         self.retro = retro
@@ -482,7 +482,7 @@ public struct AgentHorizonWastePanelView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(theme.neutrals.inner)
         )
         .accessibilityIdentifier("dashboard.agentHorizonWastePanel")
     }

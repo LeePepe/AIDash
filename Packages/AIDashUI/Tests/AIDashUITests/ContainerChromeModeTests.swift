@@ -198,7 +198,7 @@ struct ContainerChromeModeTests {
         arguments: CardStyle.allCases
     )
     func styleSemanticsSurviveInBareMode(style: CardStyle) {
-        let theme = Theme(seed: .appleBlue, neutral: .slate, isDark: false)
+        let theme = Theme.system
         let bar = AIDashChrome.stripeColor(for: style, theme: theme)
 
         switch style {
@@ -326,7 +326,6 @@ struct ContainerChromeModeTests {
         let payload = MetricPayload(items: [.init(label: "PRs merged", value: 3, trend: .up)])
         let view = MetricCardView(payload: payload, size: .medium, style: .accent)
             .environment(\.cardChromeMode, mode)
-            .designTheme(seed: .lime, neutral: .slate)
             .frame(width: 320)
 
         let renderer = ImageRenderer(content: view)
@@ -348,7 +347,6 @@ struct ContainerChromeModeTests {
         func height(_ mode: CardChromeMode) throws -> CGFloat {
             let view = MetricCardView(payload: payload, size: .medium, style: .accent)
                 .environment(\.cardChromeMode, mode)
-                .designTheme(seed: .lime, neutral: .slate)
                 .frame(width: 320)
             let renderer = ImageRenderer(content: view)
             #if canImport(AppKit)
@@ -398,13 +396,8 @@ struct ContainerChromeModeTests {
     // source slices below prove the modifier's two branches in isolation;
     // this proves the wiring between container and card).
 
-    private static let probeSeed: Seed = .lime
-    private static let probeNeutral: Neutral = .slate
-
-    /// The two tiers the probe distinguishes, resolved from the same palette
-    /// the render below uses — never a hardcoded hex (§Design System & Tokens).
     private static var probePalette: Neutrals {
-        probeNeutral.palette(isDark: false)
+        Neutral.slate.palette(isDark: false)
     }
 
     /// Fraction of the rendered container covered by each luminance tier.
@@ -419,15 +412,18 @@ struct ContainerChromeModeTests {
         let view = ContainerView(container: container(cardCount: cardCount))
             .padding(AIDashSpace.s24)
             .frame(width: 600, alignment: .leading)
-            .background(probePalette.bg)
-            .designTheme(seed: probeSeed, neutral: probeNeutral)
+            .background(Theme.system.neutrals.bg)
             .environment(\.colorScheme, .light)
 
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 1
-
         #if canImport(AppKit)
-        let image = try #require(renderer.nsImage, "container must rasterise")
+        let aqua = try #require(NSAppearance(named: .aqua))
+        var renderedImage: NSImage?
+        aqua.performAsCurrentDrawingAppearance {
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 1
+            renderedImage = renderer.nsImage
+        }
+        let image = try #require(renderedImage, "container must rasterise")
         let tiff = try #require(image.tiffRepresentation)
         let rep = try #require(NSBitmapImageRep(data: tiff))
         let page = RGBA(probePalette.bg)

@@ -16,7 +16,7 @@ public struct SectionHeaderCardView: View {
     let payload: SectionHeaderPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(payload: SectionHeaderPayload, size: CardSize, style: CardStyle) {
         self.payload = payload

@@ -4,7 +4,7 @@ import SwiftUI
 /// data-viz next to numbers, colored pills, ≥3 type levels. Lives in DesignKit
 /// so it's reusable in previews and the snapshot pipeline.
 public struct DashboardView: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     private let trend: [Double] = [12, 18, 15, 24, 21, 30, 28, 36]
 
     public init() {}
@@ -86,6 +86,5 @@ public struct DashboardView: View {
 
 #Preview("Dashboard") {
     DashboardView()
-        .designTheme(seed: .appleBlue, neutral: .slate)
         .frame(width: 720, height: 640)
 }

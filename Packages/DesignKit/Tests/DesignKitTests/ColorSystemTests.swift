@@ -24,8 +24,7 @@ func resolvedHex(_ color: Color) -> String {
 }
 
 /// HSB components of a `Color`, resolved the same way `ColorSystem` resolves
-/// them internally. Mirrors the source's private `hsbComponents` so a test
-/// can restate the web derivation independently of the implementation.
+/// them internally so tests can restate the HSB derivation independently.
 func testHSB(_ color: Color) -> (h: Double, s: Double, b: Double) {
     #if canImport(AppKit)
     let ns = NSColor(color).usingColorSpace(.deviceRGB) ?? .black
@@ -79,16 +78,16 @@ struct ColorSystemTests {
         // signature is `#C6F04A` on near-black. This is the acceptance
         // criterion for MY-1399 — before the anchor, the generic `b + 0.06`
         // lift produced `#679908`, an unusably dark olive.
-        let theme = Theme(seed: .lime, neutral: .slate, isDark: true)
-        #expect(resolvedHex(theme.primary.primary) == "#C6F04A")
+        let p = makePrimaryPalette(seed: Seed.lime.color, isDark: true, darkAnchor: Seed.lime.darkAnchor)
+        #expect(resolvedHex(p.primary) == "#C6F04A")
         #expect(Seed.lime.darkAnchorHex == "#C6F04A")
     }
 
     @Test("light lime is unchanged — the anchor is dark-only")
     func lightLimeIsUnchanged() {
         #expect(Seed.lime.hex == "#5A8A00")
-        let theme = Theme(seed: .lime, neutral: .slate, isDark: false)
-        #expect(resolvedHex(theme.primary.primary) == "#5A8A00")
+        let p = makePrimaryPalette(seed: Seed.lime.color, isDark: false, darkAnchor: Seed.lime.darkAnchor)
+        #expect(resolvedHex(p.primary) == "#5A8A00")
     }
 
     @Test("only lime pins a dark anchor — the other seeds keep the shared math")
@@ -96,23 +95,23 @@ struct ColorSystemTests {
         for seed in Seed.allCases where seed != .lime {
             #expect(seed.darkAnchor == nil, "\(seed.rawValue) must not pin a dark anchor")
         }
-        // The unanchored dark derivation is the verbatim web math
-        // (`c(h, s - 0.05, b + 0.06)`). Pinned as golden values so a future
-        // anchor change cannot silently alter the other five seeds.
-        #expect(resolves(Theme(seed: .blue, isDark: true).primary.primary, to: "#0D96FF"))
-        #expect(resolves(Theme(seed: .purple, isDark: true).primary.primary, to: "#9E5FD5"))
-        #expect(resolves(Theme(seed: .teal, isDark: true).primary.primary, to: "#1DB4A3"))
-        #expect(resolves(Theme(seed: .orange, isDark: true).primary.primary, to: "#FF7622"))
-        #expect(resolves(Theme(seed: .appleBlue, isDark: true).primary.primary, to: "#0D81FF"))
+        // The unanchored dark derivation (`c(h, s - 0.05, b + 0.06)`).
+        // Pinned as golden values so a future anchor change cannot silently
+        // alter the other five seeds.
+        #expect(resolves(makePrimaryPalette(seed: Seed.blue.color, isDark: true).primary, to: "#0D96FF"))
+        #expect(resolves(makePrimaryPalette(seed: Seed.purple.color, isDark: true).primary, to: "#9E5FD5"))
+        #expect(resolves(makePrimaryPalette(seed: Seed.teal.color, isDark: true).primary, to: "#1DB4A3"))
+        #expect(resolves(makePrimaryPalette(seed: Seed.orange.color, isDark: true).primary, to: "#FF7622"))
+        #expect(resolves(makePrimaryPalette(seed: Seed.appleBlue.color, isDark: true).primary, to: "#0D81FF"))
     }
 
     /// The unanchored dark subtle/muted/border chips, per seed.
     ///
     /// These are pinned SEPARATELY from `primary` because they derive from a
-    /// different saturation base: the shared-with-web math multiplies the
-    /// seed's own `s`, while `primary` uses `s - 0.05`. A refactor that
-    /// routes the chips through the primary's base drifts them 1–3 per
-    /// channel — visible to a golden, invisible to a primary-only test.
+    /// different saturation base: the chip math multiplies the seed's own `s`,
+    /// while `primary` uses `s - 0.05`. A refactor that routes the chips
+    /// through the primary's base drifts them 1–3 per channel — visible to a
+    /// golden, invisible to a primary-only test.
     private static let unanchoredDarkChips: [(Seed, subtle: String, muted: String, border: String)] = [
         (.blue, subtle: "#19252E", muted: "#213442", border: "#29465C"),
         (.purple, subtle: "#28212E", muted: "#392E42", border: "#4E3D5C"),
@@ -124,7 +123,7 @@ struct ColorSystemTests {
     @Test("unanchored dark subtle/muted/border keep the seed's own saturation base")
     func unanchoredDarkChipsAreGolden() {
         for (seed, subtle, muted, border) in Self.unanchoredDarkChips {
-            let p = Theme(seed: seed, neutral: .slate, isDark: true).primary
+            let p = makePrimaryPalette(seed: seed.color, isDark: true, darkAnchor: seed.darkAnchor)
             // Tolerance 1, not the default 2: the regression this guards
             // against is a 1–3 per-channel shift, so a ±2 window would let
             // two thirds of it through.
@@ -137,16 +136,11 @@ struct ColorSystemTests {
         }
     }
 
-    @Test("unanchored dark chips match the web formula exactly, not the primary's base")
-    func unanchoredDarkChipsMatchWebFormula() {
-        // Differential check against the web derivation spelled out here
-        // independently of the implementation. Both sides are built through
-        // the same `Color(hue:saturation:brightness:)` path, so this compares
-        // EXACTLY (tolerance 0) and catches even a 1-per-channel drift that
-        // the hex goldens above would round past.
+    @Test("unanchored dark chips match the seed saturation formula, not the primary's base")
+    func unanchoredDarkChipsMatchSeedFormula() {
         for seed in Seed.allCases where seed != .lime {
             let (h, s, _) = testHSB(seed.color)
-            let p = Theme(seed: seed, neutral: .slate, isDark: true).primary
+            let p = makePrimaryPalette(seed: seed.color, isDark: true, darkAnchor: seed.darkAnchor)
             let expected: [(String, Color, Color)] = [
                 ("primarySubtle", p.primarySubtle, Color(hue: h, saturation: s * 0.45, brightness: 0.18)),
                 ("primaryMuted", p.primaryMuted, Color(hue: h, saturation: s * 0.50, brightness: 0.26)),
@@ -154,7 +148,7 @@ struct ColorSystemTests {
             ]
             for (name, actual, want) in expected {
                 #expect(resolvedHex(actual) == resolvedHex(want),
-                        "\(seed.rawValue) \(name) = \(resolvedHex(actual)), web formula gives \(resolvedHex(want))")
+                        "\(seed.rawValue) \(name) = \(resolvedHex(actual)), formula gives \(resolvedHex(want))")
             }
             // And prove the distinction is real: the primary's own base
             // (s - 0.05) would produce a DIFFERENT value for at least one
@@ -167,7 +161,7 @@ struct ColorSystemTests {
 
     @Test("the anchored dark ramp stays monotonic and derived from one anchor")
     func anchoredRampIsWellFormed() {
-        let p = Theme(seed: .lime, neutral: .slate, isDark: true).primary
+        let p = makePrimaryPalette(seed: Seed.lime.color, isDark: true, darkAnchor: Seed.lime.darkAnchor)
         // hover/active brighten away from the anchor without clipping into
         // one indistinguishable near-white.
         let steps = [p.primary, p.primaryHover, p.primaryActive].map(resolvedHex)
@@ -235,7 +229,7 @@ struct ColorSystemTests {
 struct ThemeTests {
     @Test("theme resolves all three layers")
     func resolve() {
-        let t = Theme(seed: .purple, neutral: .neutral, isDark: true)
+        let t = Theme(seed: .purple, neutral: .neutral)
         #expect(t.seed == .purple)
         #expect(t.charts.count == 8)
         // chart(_:) wraps around
@@ -244,16 +238,16 @@ struct ThemeTests {
 
     @Test("semantic colors are fixed regardless of seed")
     func semanticFixed() {
-        let a = Theme(seed: .blue, neutral: .slate, isDark: false)
-        let b = Theme(seed: .orange, neutral: .slate, isDark: false)
-        #expect(a.success == b.success) // green=good never breaks
-        #expect(a.danger == b.danger)
+        let a = Theme(seed: .blue, neutral: .slate)
+        let b = Theme(seed: .orange, neutral: .slate)
+        #expect(resolvedHex(a.success) == resolvedHex(b.success)) // green=good never breaks
+        #expect(resolvedHex(a.danger) == resolvedHex(b.danger))
     }
 
     @Test("chartCategorical remaps ordinals through the [1,3,7,2,4,0,5] sequence")
     func chartCategoricalOrder() {
         #expect(Theme.categoricalOrder == [1, 3, 7, 2, 4, 0, 5])
-        let t = Theme(seed: .lime, neutral: .slate, isDark: true)
+        let t = Theme(seed: .lime, neutral: .slate)
         // The ordinal is remapped, not identity: category 0 → chart stop 1.
         #expect(t.chartCategorical(0) == t.chart(1))
         #expect(t.chartCategorical(1) == t.chart(3))
@@ -264,9 +258,45 @@ struct ThemeTests {
 
     @Test("chartCategorical keeps the first categories mutually distinct")
     func chartCategoricalDistinct() {
-        let t = Theme(seed: .lime, neutral: .slate, isDark: true)
+        let t = Theme(seed: .lime, neutral: .slate)
         let first4 = (0..<4).map { t.chartCategorical($0) }
-        let unique = Set(first4.map { String(describing: $0) })
+        let unique = Set(first4.map(resolvedHex))
         #expect(unique.count == 4, "the first four categorical slots must be visually distinct")
     }
+
+    #if canImport(AppKit)
+    @Test("Theme.system resolves dynamically from NSAppearance (.aqua vs .darkAqua) with zero manual isDark")
+    func systemThemeFollowsOSAppearanceAtDrawTime() throws {
+        let aqua = try #require(NSAppearance(named: .aqua))
+        let darkAqua = try #require(NSAppearance(named: .darkAqua))
+
+        func resolvedHexInAppearance(_ color: Color, appearance: NSAppearance) -> String {
+            var hex = "#000000"
+            appearance.performAsCurrentDrawingAppearance {
+                let ns = NSColor(color).usingColorSpace(.sRGB) ?? .black
+                let r = Int((ns.redComponent * 255).rounded())
+                let g = Int((ns.greenComponent * 255).rounded())
+                let b = Int((ns.blueComponent * 255).rounded())
+                hex = String(format: "#%02X%02X%02X", r, g, b)
+            }
+            return hex
+        }
+
+        let defaultTheme = Theme.system
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.bg, appearance: aqua) == "#EDEEF2")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.bg, appearance: darkAqua) == "#0E0F12")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.card, appearance: aqua) == "#FFFFFF")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.card, appearance: darkAqua) == "#1A1C20")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.inner, appearance: aqua) == "#F4F5F8")
+        #expect(resolvedHexInAppearance(defaultTheme.neutrals.inner, appearance: darkAqua) == "#242629")
+        #expect(resolvedHexInAppearance(defaultTheme.success, appearance: aqua) == "#34C759")
+        #expect(resolvedHexInAppearance(defaultTheme.success, appearance: darkAqua) == "#30D158")
+        #expect(resolvedHexInAppearance(defaultTheme.classificationTint(.metric), appearance: aqua) == "#007AFF")
+        #expect(resolvedHexInAppearance(defaultTheme.classificationTint(.metric), appearance: darkAqua) == "#0A84FF")
+
+        let limeDynamic = Theme(seed: .lime, neutral: .slate)
+        #expect(resolvedHexInAppearance(limeDynamic.primary.primary, appearance: aqua) == "#5A8A00")
+        #expect(resolvedHexInAppearance(limeDynamic.primary.primary, appearance: darkAqua) == "#C6F04A")
+    }
+    #endif
 }

@@ -60,7 +60,7 @@ struct BarListCardViewTests {
 
     @Test("SemanticTone maps known strings to a status color + icon, nil otherwise")
     func semanticToneMapping() {
-        let theme = Theme(seed: .lime, neutral: .slate, isDark: true)
+        let theme = Theme.system
         #expect(SemanticTone(rawValue: "warning")?.color(theme) == theme.warning)
         #expect(SemanticTone(rawValue: "success")?.color(theme) == theme.success)
         #expect(SemanticTone(rawValue: "danger")?.color(theme) == theme.danger)

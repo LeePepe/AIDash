@@ -42,7 +42,7 @@ owns: [BriefingView, ContainerView, CardRouter, DesignTokens, ContainerChrome, A
   `ContainerView` `BriefingView`。
 - **DesignTokens.swift**:卡片域**几何/排版/chrome**令牌的单一来源(`AIDashTypography`
   `AIDashSize` `AIDashChrome` `CardTypeBadge` `CardChromeModifier`)。**颜色不在此**——
-  颜色来自 DesignKit,视图经 `@Environment(\.theme)` 读 `Theme` 解析
+  颜色来自 DesignKit,视图直接消费系统动态令牌 `Theme.system` 解析
   (`classificationTint`/`success`/`warning`/`danger`/`primary`)。
 - **ContainerChrome.swift**:容器 chrome 模式(MY-1306)。容器**只按卡片数**决定卡片画不画
   边框:1 张 → `.bare`(无背景/发丝线/圆角/内边距,内容直接坐在页面底色上,`style` 移到

@@ -54,20 +54,25 @@ struct SnapshotRenderTests {
         archiveDates: [String] = [],
         hiddenCardIds: Set<String> = []
     ) throws {
-        for (suffix, scheme) in [("-light", ColorScheme.light), ("-dark", ColorScheme.dark)] {
-            let theme = Theme(seed: .lime, neutral: .slate, isDark: scheme == .dark)
+        for (suffix, scheme, appearanceName) in [
+            ("-light", ColorScheme.light, NSAppearance.Name.aqua),
+            ("-dark", ColorScheme.dark, NSAppearance.Name.darkAqua)
+        ] {
+            let appearance = try #require(NSAppearance(named: appearanceName))
             let host = BriefingView(state: state, archiveDates: archiveDates)
                 .padding(.horizontal, padding)
                 .padding(.vertical, AIDashSpacing.pageVertical)
                 .frame(width: width, alignment: .topLeading)
-                .fixedSize(horizontal: false, vertical: true)
-                .background(theme.neutrals.bg)
-                .environment(\.theme, theme)
+                .background(Theme.system.neutrals.bg)
                 .environment(\.colorScheme, scheme)
                 .environment(\.hiddenCardIds, hiddenCardIds)
-            let renderer = ImageRenderer(content: host)
-            renderer.scale = 2
-            let nsImage = try #require(renderer.nsImage)
+            var renderedImage: NSImage?
+            appearance.performAsCurrentDrawingAppearance {
+                let renderer = ImageRenderer(content: host)
+                renderer.scale = 2
+                renderedImage = renderer.nsImage
+            }
+            let nsImage = try #require(renderedImage)
             let tiff = try #require(nsImage.tiffRepresentation)
             let rep = try #require(NSBitmapImageRep(data: tiff))
             let png = try #require(rep.representation(using: .png, properties: [:]))

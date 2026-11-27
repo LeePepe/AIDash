@@ -1,50 +1,55 @@
 import SwiftUI
 #if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
 #endif
 
 // ============================================================================
-//  Theme — a resolved token set for the current (seed, neutral, colorScheme).
-//  Inject via .environment(\.theme, …); read with @Environment(\.theme).
-//  This is the SwiftUI equivalent of the web CSS-variable set.
+//  Theme — the OS-appearance-adaptive token set for (seed, neutral).
+//  `Theme.system` resolves every token directly at draw time from macOS
+//  `NSAppearance` / iOS `UITraitCollection` with zero environment plumbing.
 // ============================================================================
 
 public struct Theme: Sendable {
+    /// Global OS-dynamic system theme (`Seed.appleBlue` + `Neutral.slate`).
+    public static let system = Theme()
+
     public let seed: Seed
     public let neutral: Neutral
-    public let isDark: Bool
 
     public let primary: PrimaryPalette
     public let neutrals: Neutrals
     public let charts: [Color]
 
-    public var success: Color { Semantic.success(isDark: isDark) }
-    public var warning: Color { Semantic.warning(isDark: isDark) }
-    public var danger: Color { Semantic.danger(isDark: isDark) }
+    public var success: Color { Semantic.success }
+    public var warning: Color { Semantic.warning }
+    public var danger: Color { Semantic.danger }
 
     /// The three semantics as READABLE TEXT on a tint of themselves (status
     /// pills). The plain `success`/`warning`/`danger` above are FILL colors
     /// and do not meet small-text contrast in that role — see `Semantic`.
-    public var successOnSubtle: Color { Semantic.successOnSubtle(isDark: isDark) }
-    public var warningOnSubtle: Color { Semantic.warningOnSubtle(isDark: isDark) }
-    public var dangerOnSubtle: Color { Semantic.dangerOnSubtle(isDark: isDark) }
+    public var successOnSubtle: Color { Semantic.successOnSubtle }
+    public var warningOnSubtle: Color { Semantic.warningOnSubtle }
+    public var dangerOnSubtle: Color { Semantic.dangerOnSubtle }
 
     /// Text color for a semantic role — `body` is accessible by construction.
     /// Prefer this over reaching for `neutrals.text1/2/3` directly.
     public func text(_ role: TextRole) -> Color { neutrals.text(role) }
 
-    /// Per-category icon-badge tint, resolved for the current color scheme.
+    /// Per-category icon-badge tint, resolved dynamically for OS appearance.
     public func classificationTint(_ kind: Classification) -> Color {
-        kind.tint(isDark: isDark)
+        kind.dynamicTint
     }
 
-    public init(seed: Seed = .appleBlue, neutral: Neutral = .slate, isDark: Bool = false) {
+    /// OS-dynamic theme. All palettes resolve light vs dark dynamically at draw time
+    /// via `NSAppearance` / `UITraitCollection`.
+    public init(seed: Seed = .appleBlue, neutral: Neutral = .slate) {
         self.seed = seed
         self.neutral = neutral
-        self.isDark = isDark
-        self.primary = makePrimaryPalette(seed: seed.color, isDark: isDark, darkAnchor: seed.darkAnchor)
-        self.neutrals = neutral.palette(isDark: isDark)
-        self.charts = chartPalette(seed: seed.color, isDark: isDark)
+        self.primary = makeDynamicPrimaryPalette(seed: seed.color, darkAnchor: seed.darkAnchor)
+        self.neutrals = neutral.dynamicPalette
+        self.charts = dynamicChartPalette(seed: seed.color)
     }
 
     /// Chart color by index, wrapping the 8-stop palette.
@@ -90,38 +95,4 @@ public enum TypeScale {
     public static let body = Font.system(size: 14)
     public static let meta = Font.system(size: 12)
     public static let num = Font.system(size: 14).monospacedDigit()
-}
-
-// MARK: - Environment plumbing
-
-private struct ThemeKey: EnvironmentKey {
-    static let defaultValue = Theme(seed: .appleBlue, neutral: .slate)
-}
-
-public extension EnvironmentValues {
-    var theme: Theme {
-        get { self[ThemeKey.self] }
-        set { self[ThemeKey.self] = newValue }
-    }
-}
-
-public extension View {
-    /// Resolve the theme from a (seed, neutral) + the current colorScheme.
-    func designTheme(seed: Seed = .appleBlue, neutral: Neutral = .slate) -> some View {
-        modifier(ThemeResolver(seed: seed, neutral: neutral))
-    }
-}
-
-private struct ThemeResolver: ViewModifier {
-    let seed: Seed
-    let neutral: Neutral
-    @Environment(\.colorScheme) private var scheme
-
-    func body(content: Content) -> some View {
-        let theme = Theme(seed: seed, neutral: neutral, isDark: scheme == .dark)
-        content
-            .environment(\.theme, theme)
-            .background(theme.neutrals.bg)
-            .foregroundStyle(theme.neutrals.text1)
-    }
 }

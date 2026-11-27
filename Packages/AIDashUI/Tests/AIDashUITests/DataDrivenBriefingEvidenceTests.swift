@@ -63,16 +63,23 @@ struct DataDrivenBriefingEvidenceTests {
         guard ProcessInfo.processInfo.environment["AIDASH_SNAPSHOT"] == "1" else { return }
 
         #if canImport(AppKit)
-        for (suffix, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
+        for (suffix, scheme, appearanceName) in [
+            ("light", ColorScheme.light, NSAppearance.Name.aqua),
+            ("dark", ColorScheme.dark, NSAppearance.Name.darkAqua)
+        ] {
+            let appearance = try #require(NSAppearance(named: appearanceName))
             let page = Self.page(containers: containers)
                 .frame(width: Space.contentMaxWidth)
-                .designTheme(seed: .lime, neutral: .slate)
                 .environment(\.colorScheme, scheme)
 
-            let renderer = ImageRenderer(content: page)
-            renderer.scale = 2
+            var renderedImage: NSImage?
+            appearance.performAsCurrentDrawingAppearance {
+                let renderer = ImageRenderer(content: page)
+                renderer.scale = 2
+                renderedImage = renderer.nsImage
+            }
 
-            let nsImage = try #require(renderer.nsImage, "ImageRenderer produced no image (\(suffix))")
+            let nsImage = try #require(renderedImage, "ImageRenderer produced no image (\(suffix))")
             let tiff = try #require(nsImage.tiffRepresentation)
             let rep = try #require(NSBitmapImageRep(data: tiff))
             let png = try #require(rep.representation(using: .png, properties: [:]))
@@ -99,7 +106,7 @@ struct DataDrivenBriefingEvidenceTests {
     }
 
     private struct ThemedPage: View {
-        @Environment(\.theme) private var theme
+        private let theme = Theme.system
         let containers: [ContainerModel]
 
         var body: some View {

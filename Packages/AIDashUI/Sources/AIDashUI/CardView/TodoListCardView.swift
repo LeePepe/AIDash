@@ -79,7 +79,7 @@ public struct TodoListCardView: View {
 // MARK: - TodoItemRow
 
 private struct TodoItemRow: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.onToggleDone) private var onToggleDone
     @Environment(\.doneItemRefs) private var doneItemRefs
     @Environment(\.currentCardId) private var currentCardId

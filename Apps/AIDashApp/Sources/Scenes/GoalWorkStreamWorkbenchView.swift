@@ -123,6 +123,89 @@ public enum WorkStatusFormatter {
     }
 }
 
+public enum GoalFilterSegmentedBarVariant: String, CaseIterable, Sendable {
+    case pillCapsule
+    case underlinedTabStrip
+}
+
+@MainActor
+public struct GoalFilterSegmentedBar: View {
+    @Binding public var selection: GoalWorkStreamFilter
+    public let variant: GoalFilterSegmentedBarVariant
+    private let theme = Theme.system
+
+    public init(
+        selection: Binding<GoalWorkStreamFilter>,
+        variant: GoalFilterSegmentedBarVariant = .pillCapsule
+    ) {
+        self._selection = selection
+        self.variant = variant
+    }
+
+    public var body: some View {
+        switch variant {
+        case .pillCapsule:
+            HStack(spacing: 3) {
+                ForEach(GoalWorkStreamFilter.allCases) { item in
+                    let isSelected = selection == item
+                    Button {
+                        selection = item
+                    } label: {
+                        Text(item.title)
+                            .font(.caption.weight(isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? theme.neutrals.text1 : theme.neutrals.text2)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .frame(minHeight: 28)
+                            .background(
+                                isSelected ? theme.neutrals.card : Color.clear,
+                                in: Capsule()
+                            )
+                            .overlay {
+                                if isSelected {
+                                    Capsule()
+                                        .strokeBorder(theme.neutrals.border.opacity(0.65), lineWidth: 1)
+                                }
+                            }
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(3)
+            .background(theme.neutrals.inner, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(theme.neutrals.border.opacity(0.45), lineWidth: 1)
+            )
+            .fixedSize(horizontal: true, vertical: false)
+        case .underlinedTabStrip:
+            HStack(spacing: 6) {
+                ForEach(GoalWorkStreamFilter.allCases) { item in
+                    let isSelected = selection == item
+                    Button {
+                        selection = item
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(item.title)
+                                .font(.caption.weight(isSelected ? .semibold : .medium))
+                                .foregroundStyle(isSelected ? theme.primary.primary : theme.neutrals.text2)
+                                .padding(.horizontal, 8)
+                            Capsule()
+                                .fill(isSelected ? theme.primary.primary : Color.clear)
+                                .frame(height: 2)
+                        }
+                        .frame(minHeight: 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+}
+
 public enum GoalBadgeTone: Sendable {
     case success
     case warning
@@ -135,7 +218,7 @@ public struct WorkStatusActionSplitBar: View {
     public let split: WorkStatusActionSplit
     public let height: CGFloat
     @State private var hoveredSegment: Int?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(split: WorkStatusActionSplit, height: CGFloat = 8) {
         self.split = split
@@ -194,7 +277,7 @@ public struct GoalWorkStreamWorkbenchView: View {
     @State private var selectedFilter: GoalWorkStreamFilter = .all
     @State private var expandedGoalIDs: Set<String>
     @State private var activeReceipt: SessionReceiptPresentation?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -539,17 +622,8 @@ public struct GoalWorkStreamWorkbenchView: View {
     }
 
     private var segmentedFilterPicker: some View {
-        Picker(DashboardL10n.tr("dashboard.work_status.filter_picker", "Goal 筛选"), selection: $selectedFilter) {
-            ForEach(GoalWorkStreamFilter.allCases) { item in
-                Text(item.title).tag(item)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
-        .fixedSize(horizontal: true, vertical: false)
-        .frame(minHeight: 28)
-        .captureDashboardGeometry(id: "work-status-filter", role: "segmented")
+        GoalFilterSegmentedBar(selection: $selectedFilter, variant: .pillCapsule)
+            .captureDashboardGeometry(id: "work-status-filter", role: "segmented")
     }
 
     private func actionLegendItems(_ split: WorkStatusActionSplit, visibleCount: Int) -> some View {
@@ -769,7 +843,7 @@ private struct GoalWorkStreamExpandableRow: View {
     let reduceMotion: Bool
     let onToggleExpand: () -> Void
     let onOpenSessionReceipt: (WorkStatusSessionReceipt) -> Void
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1059,7 +1133,7 @@ public struct SessionWorkReceiptSheet: View {
     public let presentation: SessionReceiptPresentation
     @State private var showExtendedMetadata = true
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.locale) private var locale
 
     public init(presentation: SessionReceiptPresentation) {

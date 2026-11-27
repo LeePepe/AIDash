@@ -6,7 +6,7 @@ public struct AgentSummaryCardView: View {
     let payload: AgentSummaryPayload
     let size: CardSize
     let style: CardStyle
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     public init(payload: AgentSummaryPayload, size: CardSize, style: CardStyle) {
         self.payload = payload

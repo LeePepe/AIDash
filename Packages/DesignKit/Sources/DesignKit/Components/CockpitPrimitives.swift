@@ -34,7 +34,7 @@ public extension View {
 
 /// A compact, token-backed section rail/status chip.
 public struct RailChip: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
 
     private let title: String
     private let icon: String?

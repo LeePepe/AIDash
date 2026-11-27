@@ -109,6 +109,7 @@ private struct ScheduledPulseCompartmentView: View {
     @Binding var hoveredJobID: ScheduledPulseJobID?
     let select: (ScheduledJobFrameworkEntry) -> Void
     let color: (ScheduledJobSemanticState) -> Color
+    private let theme = Theme.system
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -125,14 +126,14 @@ private struct ScheduledPulseCompartmentView: View {
         }
         .padding(10)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.48), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 1) }
+        .background(theme.neutrals.card.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(theme.neutrals.border.opacity(0.65), lineWidth: 1) }
     }
 
     private func jobCard(for entry: ScheduledJobFrameworkEntry) -> some View {
         let isSelected = selectedEntryID == entry.id
         let isHovered = hoveredJobID == entry.id
-        let backgroundOpacity = isSelected ? 0.74 : (isHovered ? 0.66 : 0.58)
+        let backgroundOpacity = isSelected ? 0.92 : (isHovered ? 0.80 : 0.68)
         let strokeColor = borderColor(for: entry, isSelected: isSelected, isHovered: isHovered)
         let strokeWidth: CGFloat = isSelected ? 1.5 : 1
         return Button { select(entry) } label: {
@@ -143,7 +144,7 @@ private struct ScheduledPulseCompartmentView: View {
         .padding(8)
         .frame(maxWidth: .infinity, minHeight: 58, maxHeight: 58, alignment: .leading)
         .background(
-            Color(nsColor: .controlBackgroundColor).opacity(backgroundOpacity),
+            theme.neutrals.inner.opacity(backgroundOpacity),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
         .overlay(
@@ -157,7 +158,7 @@ private struct ScheduledPulseCompartmentView: View {
     private func borderColor(for entry: ScheduledJobFrameworkEntry, isSelected: Bool, isHovered: Bool) -> Color {
         if isSelected { return color(entry.semanticState).opacity(0.85) }
         if isHovered { return Color.primary.opacity(0.28) }
-        return Color(nsColor: .separatorColor).opacity(0.65)
+        return theme.neutrals.border.opacity(0.75)
     }
 
     private func cardLabel(for entry: ScheduledJobFrameworkEntry) -> some View {
@@ -206,7 +207,7 @@ private struct ScheduledPulseCompartmentView: View {
 public struct ScheduledPulsePageView: View {
     @Bindable public var store: DashboardWorkspaceStore
     @State private var installerError: String?
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let registerJobs: @MainActor () -> Void
 
@@ -319,7 +320,7 @@ public struct ScheduledPulsePageView: View {
                     HStack(spacing: 8) {
                         Button(DashboardL10n.tr("dashboard.scheduled_pulse.run_now", "Run now")) { store.runScheduledJobNow(entry.id) }
                             .buttonStyle(.borderedProminent).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-run", role: "button")
-                        Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "Refresh status")) { store.refreshFromProvider() }
+                        Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "Refresh status")) { reload() }
                             .buttonStyle(.bordered).frame(minWidth: 28, minHeight: 28).captureDashboardGeometry(id: "pulse-refresh", role: "button")
                         Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "Stop") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "Start")) {
                             handle(entry.launchdStatus?.isLoaded == true ? store.stopScheduledJob(entry.id) : store.startScheduledJob(entry.id))
@@ -365,7 +366,7 @@ public struct ScheduledPulsePageView: View {
                         }
                     }
                     .padding(8)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
         }
@@ -468,8 +469,8 @@ public struct ScheduledPulsePageView: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
     }
 
     private var latestRunText: String {
@@ -573,7 +574,7 @@ public struct ScheduledPulsePageView: View {
                     .disabled(store.runningJobIDs.contains(entry.id) || !entry.definition.isLive)
                     .captureDashboardGeometry(id: "pulse-run", role: "button")
                 if store.runningJobIDs.contains(entry.id) { ProgressView().controlSize(.small) }
-                Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "刷新状态")) { store.refreshFromProvider() }
+                Button(DashboardL10n.tr("dashboard.scheduled_pulse.refresh_status", "刷新状态")) { reload() }
                     .buttonStyle(.bordered).controlSize(.small).frame(minHeight: 28)
                     .captureDashboardGeometry(id: "pulse-refresh", role: "button")
                 Button(entry.launchdStatus?.isLoaded == true ? DashboardL10n.tr("dashboard.scheduled_pulse.stop", "停止") : DashboardL10n.tr("dashboard.scheduled_pulse.start", "启动")) {
@@ -589,8 +590,8 @@ public struct ScheduledPulsePageView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
     }
 
     private func stageReceiptStrip(for entry: ScheduledJobFrameworkEntry) -> some View {
@@ -613,7 +614,7 @@ public struct ScheduledPulsePageView: View {
                 }
                 .padding(7)
                 .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(stageColor(stage.semanticState).opacity(0.18))
@@ -668,6 +669,10 @@ public struct ScheduledPulsePageView: View {
         store.scheduledPulseTab = .overview
     }
 
+    private func reload() {
+        store.refreshFromProvider()
+    }
+
     private func handle(_ outcome: ScheduledPulseLaunchdInstaller.RegistrationOutcome) {
         installerError = outcome.failureDescription
     }
@@ -677,6 +682,7 @@ public struct ScheduledPulsePageView: View {
 private struct ScheduledJobActionView: View {
     let action: ScheduledJobAction
     let onAcknowledge: ([ScheduledJobActionResponse]) -> Void
+    private let theme = Theme.system
     @State private var values: [String: String] = [:]
     @State private var selectedValues: [String: Set<String>] = [:]
 
@@ -700,8 +706,8 @@ private struct ScheduledJobActionView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color(nsColor: .separatorColor), lineWidth: 1) }
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(theme.neutrals.border, lineWidth: 1) }
     }
 
     private func decisionLabel(_ option: String) -> String {

@@ -7,7 +7,7 @@ import AIDashCore
 /// Read-only review of the authoritative action and the staged proposal, outside Briefing.
 @MainActor
 struct JobActionsReviewView: View {
-    @Environment(\.theme) private var theme
+    private let theme = Theme.system
     let review: JobActionsReviewModel
     let confirm: () -> Void
     let cancel: () -> Void
@@ -99,7 +99,7 @@ struct JobActionsReviewView: View {
                     }
                     .keyboardShortcut(.cancelAction)
                     .disabled(review.phase == .recording)
-                    Button(action: confirm) {
+                    Button(action: retry) {
                         Text("job_actions.review.confirm").frame(minHeight: 28)
                     }
                     .buttonStyle(.borderedProminent)
@@ -112,6 +112,10 @@ struct JobActionsReviewView: View {
         .lineLimit(nil)
         .background(theme.neutrals.bg)
         .frame(minWidth: 480, idealWidth: 560, maxWidth: 640, minHeight: 360, idealHeight: 600, maxHeight: 720)
+    }
+
+    private func retry() {
+        confirm()
     }
 
     @ViewBuilder private var status: some View {
@@ -181,7 +185,6 @@ final class JobActionsNativePresenter: JobActionsReviewPresenting {
         let view = JobActionsReviewView(review: review, confirm: confirm, cancel: { [weak self] in
             self?.close(requestID: requestID)
         })
-        .designTheme(seed: .lime, neutral: .slate)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 600),
             styleMask: [.titled, .closable, .resizable],
