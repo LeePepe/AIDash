@@ -32,6 +32,15 @@ Owns app lifecycle, scenes, menu bar behavior, sync, XPC service, launchd
 installation, resources, entitlements, and app-target tests. Workspace target
 wiring belongs to XcodeWorkspace.
 
+macOS workspace navigation uses a 3-Section `NavigationSplitView` sidebar
+(`总览与进化` / `Goal 与工作流` / `Skills 武器库`). Section 2
+(`GoalWorkStreamWorkbenchView` + `WorkStatusWorkbenchSnapshot`) consumes
+`aidash-work-status/v1` (`work-status.json` with read-only `warehouse.db`
+`fact_session_work_summary` fallback), rendering Goal-aggregated expandable
+rows, 4-segment action bars, skill hit/empty-load chips, concrete file/PR
+outputs, and a 1-page `SessionWorkReceiptSheet` without raw prompt spans or
+bare internal codes, alongside Native 120Hz `PreviewHost` `v01..v04` variants.
+
 macOS fixed installs run sandboxed with `AIDashApp.macOS.fixed.entitlements`.
 Host-home telemetry reads must use `getpwuid(getuid())` guarded by
 `XCTestConfigurationFilePath == nil`; read-only path exceptions must be

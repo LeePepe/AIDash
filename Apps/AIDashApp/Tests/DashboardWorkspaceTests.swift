@@ -911,6 +911,7 @@ struct DashboardWorkspaceTests {
     func terminalLoginSidebarFooterAndTelemetryTailCache() throws {
         #expect(DashboardWorkspaceSection.primaryNavigationSections == [
             .overview,
+            .goalWorkStream,
             .agentEfficiency
         ])
         #expect(!DashboardWorkspaceSection.primaryNavigationSections.contains(.settings))
@@ -1025,15 +1026,17 @@ struct DashboardWorkspaceTests {
         }
     }
 
-    @Test("PreviewHost exposes two zero-jargon trend tabs, twenty unique topologies, isolated feedback bar, and receipt round-trip")
+    @Test("PreviewHost exposes three zero-jargon sections including 2+1+1 Goal Work Stream variants, isolated feedback bar, and receipt round-trip")
     func previewHostCatalogAndReceiptRoundTrip() throws {
         let tab1 = Tab1QuotasAndAgentEfficiencySections.descriptors
+        let tab3 = Tab3GoalWorkStreamSections.descriptors
         let tab2 = Tab2SkillsArsenalInspectorSections.descriptors
-        let all = tab1 + tab2
+        let all = tab1 + tab3 + tab2
         #expect(tab1.count == 10)
+        #expect(tab3.count == 4)
         #expect(tab2.count == 10)
-        #expect(Set(all.map(\.id)).count == 20)
-        #expect(Set(all.map(\.topologySignature)).count == 20)
+        #expect(Set(all.map(\.id)).count == 24)
+        #expect(Set(all.map(\.topologySignature)).count == 24)
         #expect(all.allSatisfy { !$0.title.isEmpty && !$0.metricTags.isEmpty })
 
         let forbiddenJargon = [
@@ -1098,6 +1101,10 @@ struct DashboardWorkspaceTests {
         let views: [(String, AnyView)] = [
             ("tab1-v01", AnyView(Tab1QuotasAndAgentEfficiencySections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
             ("tab1-v10", AnyView(Tab1QuotasAndAgentEfficiencySections.v10(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab3-v01", AnyView(Tab3GoalWorkStreamSections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab3-v02", AnyView(Tab3GoalWorkStreamSections.v02(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab3-v03", AnyView(Tab3GoalWorkStreamSections.v03(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab3-v04", AnyView(Tab3GoalWorkStreamSections.v04(data: sample, globalExpandAll: true, speed: .quarter))),
             ("tab2-v01", AnyView(Tab2SkillsArsenalInspectorSections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
             ("tab2-v10", AnyView(Tab2SkillsArsenalInspectorSections.v10(data: sample, globalExpandAll: true, speed: .quarter)))
         ]
@@ -2723,6 +2730,360 @@ struct DashboardWorkspaceTests {
                 #expect(bmp.pixelsWide >= 1000)
                 #expect(bmp.pixelsHigh >= 180)
                 try png.write(to: outDir.appendingPathComponent("agent-retro-\(stateName)-\(appearance).png"))
+            }
+        }
+    }
+
+    @Test("WorkStatusWorkbenchSnapshot decodes aidash-work-status/v1 verbatim, falls back to warehouse.db, and exports 4x2 GoalWorkStream PNGs")
+    func workStatusSnapshotDecodeWarehouseFallbackAndRender4x2PNGs() throws {
+        let workStatusJSON = #"""
+        {
+          "contract": "aidash-work-status/v1",
+          "schema_version": 1,
+          "generated_at": "2026-11-27T01:00:00Z",
+          "window_cst": "14d",
+          "window_start": "2026-11-14",
+          "window_end": "2026-11-27",
+          "source_as_of": "2026-11-27",
+          "sample_size": 5,
+          "coverage_status": "healthy",
+          "pulse": {
+            "goals_count": 2,
+            "buckets_count": 3,
+            "sessions_count": 5,
+            "duration_sec": 3420.0,
+            "total_tokens": 412000,
+            "files_changed_count": 14,
+            "commits_count": 5,
+            "prs_touched_count": 2,
+            "action_split": {
+              "total_calls": 40,
+              "search_read_calls": 12,
+              "code_edit_calls": 18,
+              "verify_script_calls": 8,
+              "spin_rework_calls": 2,
+              "search_read_pct": 30.0,
+              "code_edit_pct": 45.0,
+              "verify_script_pct": 20.0,
+              "spin_rework_pct": 5.0
+            }
+          },
+          "goals": [
+            {
+              "goal_id": "atlas-workbench-rollout",
+              "title": "三段式工作台与单页账单交付",
+              "is_unassigned_bucket": false,
+              "repo": "Atlas/Workbench",
+              "status": "active",
+              "review_round_badge": "R1",
+              "latest_activity_at": "2026-11-27T00:58:00Z",
+              "duration_sec": 1440.0,
+              "turn_count": 16,
+              "total_tokens": 185000,
+              "skills_used": [
+                {
+                  "skill": "team-lead",
+                  "session_loads": 2,
+                  "reference_sessions": 1,
+                  "script_sessions": 2,
+                  "used_reference": true,
+                  "used_script": true,
+                  "empty_load": false
+                },
+                {
+                  "skill": "my-designer",
+                  "session_loads": 1,
+                  "reference_sessions": 0,
+                  "script_sessions": 0,
+                  "used_reference": false,
+                  "used_script": false,
+                  "empty_load": true
+                }
+              ],
+              "action_split": {
+                "total_calls": 20,
+                "search_read_calls": 6,
+                "code_edit_calls": 9,
+                "verify_script_calls": 4,
+                "spin_rework_calls": 1,
+                "search_read_pct": 30.0,
+                "code_edit_pct": 45.0,
+                "verify_script_pct": 20.0,
+                "spin_rework_pct": 5.0
+              },
+              "outputs": {
+                "files_changed_count": 6,
+                "commits_count": 2,
+                "pr_number": 254,
+                "session_count": 2
+              },
+              "ai_signals": [
+                {
+                  "kind": "empty_skill_load",
+                  "severity": "warning",
+                  "target": "skill_owner",
+                  "label_zh": "技能空载提醒：my-designer 已加载但未命中参考文档或脚本",
+                  "label_en": "Unused skill context: my-designer loaded without script or reference use"
+                }
+              ],
+              "sessions": [
+                {
+                  "session_uid": "sw:11112222333344445555",
+                  "session_id_short": "11112222",
+                  "source": "copilot_cli",
+                  "role_key": "m1",
+                  "role_label_zh": "主控编排",
+                  "role_label_en": "Goal Lead",
+                  "model_id": "gemini-4-carbon",
+                  "branch": "feat/atlas-workbench",
+                  "summary_label": "推进三段式工作台收敛与四段动作光谱对齐",
+                  "started_at": "2026-11-27T00:20:00Z",
+                  "ended_at": "2026-11-27T00:32:00Z",
+                  "cst_day": "2026-11-27",
+                  "duration_sec": 720.0,
+                  "turn_count": 7,
+                  "total_tokens": 82000,
+                  "skills_used": [
+                    {"skill": "team-lead", "used_reference": true, "used_script": true, "empty_load": false},
+                    {"skill": "my-designer", "used_reference": false, "used_script": false, "empty_load": true}
+                  ],
+                  "action_split": {
+                    "total_calls": 9,
+                    "search_read_calls": 4,
+                    "code_edit_calls": 3,
+                    "verify_script_calls": 2,
+                    "spin_rework_calls": 0,
+                    "search_read_pct": 44.4,
+                    "code_edit_pct": 33.3,
+                    "verify_script_pct": 22.3,
+                    "spin_rework_pct": 0.0
+                  },
+                  "outputs": {"files_changed_count": 2, "commits_count": 1, "pr_number": 254}
+                },
+                {
+                  "session_uid": "sw:66667777888899990000",
+                  "session_id_short": "66667777",
+                  "source": "copilot_cli",
+                  "role_key": "writer",
+                  "role_label_zh": "编码实现",
+                  "role_label_en": "Code Implementation",
+                  "model_id": "gpt-5.6",
+                  "branch": "feat/atlas-workbench",
+                  "summary_label": "实现可扩展 Goal 行与单页会话账单",
+                  "started_at": "2026-11-27T00:34:00Z",
+                  "ended_at": "2026-11-27T00:46:00Z",
+                  "cst_day": "2026-11-27",
+                  "duration_sec": 720.0,
+                  "turn_count": 9,
+                  "total_tokens": 103000,
+                  "skills_used": [
+                    {"skill": "xcode-cli", "used_reference": true, "used_script": true, "empty_load": false}
+                  ],
+                  "action_split": {
+                    "total_calls": 11,
+                    "search_read_calls": 2,
+                    "code_edit_calls": 6,
+                    "verify_script_calls": 2,
+                    "spin_rework_calls": 1,
+                    "search_read_pct": 18.2,
+                    "code_edit_pct": 54.5,
+                    "verify_script_pct": 18.2,
+                    "spin_rework_pct": 9.1
+                  },
+                  "outputs": {"files_changed_count": 4, "commits_count": 1, "pr_number": 254}
+                }
+              ]
+            },
+            {
+              "goal_id": "atlas-data-contract",
+              "title": "数仓会话工作摘要流水线",
+              "is_unassigned_bucket": false,
+              "repo": "Atlas/Data",
+              "status": "done",
+              "review_round_badge": "R2",
+              "latest_activity_at": "2026-11-26T22:10:00Z",
+              "duration_sec": 1260.0,
+              "turn_count": 12,
+              "total_tokens": 149000,
+              "skills_used": [
+                {"skill": "aidash-metrics", "session_loads": 1, "reference_sessions": 1, "script_sessions": 1, "used_reference": true, "used_script": true, "empty_load": false}
+              ],
+              "action_split": {
+                "total_calls": 14,
+                "search_read_calls": 4,
+                "code_edit_calls": 6,
+                "verify_script_calls": 4,
+                "spin_rework_calls": 0,
+                "search_read_pct": 28.6,
+                "code_edit_pct": 42.8,
+                "verify_script_pct": 28.6,
+                "spin_rework_pct": 0.0
+              },
+              "outputs": {"files_changed_count": 5, "commits_count": 2, "pr_number": 251, "session_count": 2},
+              "ai_signals": [
+                {"kind": "steady_delivery", "severity": "positive", "target": "workflow", "label_zh": "交付链路平稳，无空载技能或脚本阻塞", "label_en": "Steady delivery"}
+              ],
+              "sessions": [
+                {
+                  "session_uid": "sw:aaaa1111bbbb2222cccc",
+                  "session_id_short": "aaaa1111",
+                  "source": "copilot_cli",
+                  "role_key": "reviewer",
+                  "role_label_zh": "独立审查",
+                  "role_label_en": "Independent Reviewer",
+                  "model_id": "gemini-4-argon",
+                  "cst_day": "2026-11-26",
+                  "duration_sec": 420.0,
+                  "turn_count": 4,
+                  "total_tokens": 49000,
+                  "skills_used": [{"skill": "code-review", "used_reference": true, "used_script": false, "empty_load": false}],
+                  "action_split": {"total_calls": 5, "search_read_calls": 3, "code_edit_calls": 0, "verify_script_calls": 2, "spin_rework_calls": 0, "search_read_pct": 60.0, "code_edit_pct": 0.0, "verify_script_pct": 40.0, "spin_rework_pct": 0.0},
+                  "outputs": {"files_changed_count": 0, "commits_count": 0, "pr_number": 251}
+                }
+              ]
+            },
+            {
+              "goal_id": "unassigned-daily",
+              "title": "日常独立会话（未绑定独立 Goal）",
+              "is_unassigned_bucket": true,
+              "repo": "Atlas/Sandbox",
+              "status": "daily",
+              "review_round_badge": null,
+              "latest_activity_at": "2026-11-26T18:00:00Z",
+              "duration_sec": 720.0,
+              "turn_count": 6,
+              "total_tokens": 78000,
+              "skills_used": [],
+              "action_split": {"total_calls": 6, "search_read_calls": 2, "code_edit_calls": 3, "verify_script_calls": 0, "spin_rework_calls": 1, "search_read_pct": 33.3, "code_edit_pct": 50.0, "verify_script_pct": 0.0, "spin_rework_pct": 16.7},
+              "outputs": {"files_changed_count": 3, "commits_count": 1, "pr_number": null, "session_count": 1},
+              "ai_signals": [],
+              "sessions": []
+            }
+          ]
+        }
+        """#
+
+        let decoded = try JSONDecoder().decode(WorkStatusWorkbenchSnapshot.self, from: Data(workStatusJSON.utf8))
+        #expect(decoded.contract == "aidash-work-status/v1")
+        #expect(decoded.coverageStatus == "healthy")
+        #expect(decoded.sampleSize == 5)
+        #expect(decoded.pulse.goalsCount == 2)
+        #expect(decoded.pulse.prsTouchedCount == 2)
+        #expect(decoded.goals.count == 3)
+        #expect(decoded.goals.first?.outputs.prNumber == 254)
+        #expect(decoded.goals.first?.skillsUsed.count == 2)
+        #expect(decoded.goals.first?.skillsUsed.last?.emptyLoad == true)
+        #expect(GoalWorkStreamFilter.activeAndBlocked.matches(decoded.goals[0]) == true)
+        #expect(GoalWorkStreamFilter.needsOptimization.matches(decoded.goals[0]) == true)
+        #expect(GoalWorkStreamFilter.delivered.matches(decoded.goals[1]) == true)
+
+        // 1. Local + iCloud mirror freshness selection for work-status.json
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-work-status-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let localDir = home.appendingPathComponent("Library/Application Support/AIDash/jobs/aidata-digest", isDirectory: true)
+        let mirrorDir = LiveDashboardTelemetryReader.iCloudSyncRootURL(homeURL: home).appendingPathComponent("jobs/aidata-digest", isDirectory: true)
+        try FileManager.default.createDirectory(at: localDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: mirrorDir, withIntermediateDirectories: true)
+        try Data(workStatusJSON.utf8).write(to: localDir.appendingPathComponent("work-status.json"))
+        let loadedSnap = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: home)?.workStatus)
+        #expect(loadedSnap.sampleSize == 5)
+        #expect(loadedSnap.goals.first?.goalID == "atlas-workbench-rollout")
+
+        // 2. SQLite warehouse.db fallback when work-status.json is absent
+        let whHome = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-work-status-wh-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: whHome) }
+        let whDir = whHome.appendingPathComponent("Development/AIDash/aidata/L3_merge", isDirectory: true)
+        try FileManager.default.createDirectory(at: whDir, withIntermediateDirectories: true)
+        let whURL = whDir.appendingPathComponent("warehouse.db")
+        var db: OpaquePointer?
+        #expect(sqlite3_open(whURL.path, &db) == SQLITE_OK)
+        if let db {
+            let ddl = """
+            CREATE TABLE dim_goal (goal_uid TEXT PRIMARY KEY, goal_id TEXT, title TEXT, static_header_status TEXT, derived_actual_status TEXT, last_event_at TEXT);
+            INSERT INTO dim_goal VALUES ('g:1', 'atlas-wh-goal', '数仓回退 Goal 验证', 'active', 'done', '2026-11-27T01:00:00Z');
+            CREATE TABLE fact_gtt_task_run (goal_uid TEXT, goal_id TEXT, task_id TEXT, role_name TEXT, round_no INTEGER, v5_verdict TEXT, status TEXT);
+            INSERT INTO fact_gtt_task_run VALUES ('g:1', 'atlas-wh-goal', 'T1', 'reviewer', 1, 'PASS', 'done');
+            CREATE TABLE fact_session_work_summary (
+                session_uid TEXT PRIMARY KEY, source TEXT, session_id_short TEXT, goal_id TEXT, repo_name TEXT,
+                branch_name TEXT, role_key TEXT, model_id TEXT, summary_label TEXT, started_at TEXT, ended_at TEXT,
+                duration_sec REAL, turn_count INTEGER, total_tokens INTEGER, skills_json TEXT,
+                search_read_calls INTEGER, code_edit_calls INTEGER, verify_script_calls INTEGER, spin_rework_calls INTEGER,
+                files_changed_count INTEGER, commits_count INTEGER, pr_number INTEGER, slow_or_failed_scripts_json TEXT, cst_day TEXT
+            );
+            INSERT INTO fact_session_work_summary VALUES (
+                'sw:wh1', 'copilot_cli', 'abcd1234', 'atlas-wh-goal', 'Atlas/Core', 'feat/wh', 'm1', 'gpt-6.1',
+                '数仓回退摘要', '2026-11-27T00:00:00Z', '2026-11-27T00:15:00Z', 900.0, 8, 95000, '["team-lead"]',
+                5, 7, 3, 0, 4, 1, 299, '[]', '2026-11-27'
+            );
+            """
+            #expect(sqlite3_exec(db, ddl, nil, nil, nil) == SQLITE_OK)
+            sqlite3_close(db)
+        }
+        let fbSnap = try #require(LiveDashboardTelemetryReader.loadLiveEfficiencySummary(homeURL: whHome)?.workStatus)
+        #expect(fbSnap.coverageStatus == "healthy")
+        #expect(fbSnap.sampleSize == 1)
+        #expect(fbSnap.goals.first?.title == "数仓回退 Goal 验证")
+        #expect(fbSnap.goals.first?.reviewRoundBadge == "R1")
+        #expect(fbSnap.goals.first?.outputs.prNumber == 299)
+
+        // 3. Export 4 states x 2 appearances PNGs via ImageRenderer / NSHostingView bitmap
+        let env = ProcessInfo.processInfo.environment
+        let configuredDir: String? = [
+            env["AIDASH_WORK_STATUS_SCREENSHOT_DIR"],
+            env["TEST_RUNNER_AIDASH_WORK_STATUS_SCREENSHOT_DIR"],
+        ].compactMap { val -> String? in
+            guard let val, !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return val
+        }.first
+        let ownsOut = configuredDir == nil
+        let outDir = configuredDir.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("aidash-work-status-shots-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            if ownsOut { try? FileManager.default.removeItem(at: outDir) }
+        }
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        var populatedSum = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+        populatedSum.workStatus = decoded
+        var partialSum = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+        partialSum.workStatus = WorkStatusWorkbenchSnapshot(
+            windowCST: "14d", sourceAsOf: "2026-11-27", sampleSize: 5, coverageStatus: "partial",
+            pulse: decoded.pulse, goals: decoded.goals
+        )
+        var emptySum = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+        emptySum.workStatus = WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "unknown")
+        var degradedSum = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+        degradedSum.workStatus = WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "missing")
+
+        let states: [(String, LiveDashboardTelemetryReader.LiveEfficiencySummary, Bool)] = [
+            ("populated", populatedSum, false),
+            ("partial", partialSum, true),
+            ("empty", emptySum, false),
+            ("degraded", degradedSum, false),
+        ]
+        for (stateName, stateSum, loadingFlag) in states {
+            for scheme in [ColorScheme.light, ColorScheme.dark] {
+                let appearance = scheme == .dark ? "dark" : "light"
+                let view = GoalWorkStreamWorkbenchView(
+                    summary: stateSum,
+                    isLoading: loadingFlag,
+                    onRefresh: {}
+                )
+                .padding(20)
+                .frame(width: 1120, alignment: .topLeading)
+                .background(Color(nsColor: .underPageBackgroundColor))
+                .environment(\.colorScheme, scheme)
+                .environment(\.theme, Theme(isDark: scheme == .dark))
+                let renderer = ImageRenderer(content: view)
+                renderer.scale = 2
+                let nsImg = try #require(renderer.nsImage)
+                let tiff = try #require(nsImg.tiffRepresentation)
+                let bmp = try #require(NSBitmapImageRep(data: tiff))
+                let png = try #require(bmp.representation(using: .png, properties: [:]))
+                #expect(!png.isEmpty)
+                #expect(bmp.pixelsWide >= 1280)
+                #expect(bmp.pixelsHigh >= 200)
+                try png.write(to: outDir.appendingPathComponent("goal-work-stream-\(stateName)-\(appearance).png"))
             }
         }
     }

@@ -1546,5 +1546,105 @@ struct TK3SnapshotRenderTests {
             }
         }
     }
+
+    @Test("GoalWorkStreamWorkbenchView and SessionWorkReceiptSheet enforce 3-Section navigation and zero bare internal codes")
+    func goalWorkStreamPlainLanguageAndReceiptSheetAccessibility() throws {
+        #expect(DashboardWorkspaceSection.primaryNavigationSections == [
+            .overview,
+            .goalWorkStream,
+            .agentEfficiency
+        ])
+
+        let forbiddenCodeRegex = try NSRegularExpression(
+            pattern: #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
+        )
+        let forbiddenCLIWordRegex = try NSRegularExpression(
+            pattern: #"\b(?:python3|skill_contract\.py|skill_retro\.py|agent_retro\.py|session_id|SKILL\.md|inspector)\b"#,
+            options: [.caseInsensitive]
+        )
+
+        // 1. Source scan on GoalWorkStreamWorkbenchView.swift & Tab3GoalWorkStreamSections.swift
+        for relPath in [
+            "Apps/AIDashApp/Sources/Scenes/GoalWorkStreamWorkbenchView.swift",
+            "Apps/AIDashApp/Sources/Scenes/PreviewHost/Tab3GoalWorkStreamSections.swift",
+        ] {
+            let src = try String(contentsOf: TK3Fixtures.root.appendingPathComponent(relPath), encoding: .utf8)
+            let codeHits = forbiddenCodeRegex.matches(in: src, range: NSRange(src.startIndex..<src.endIndex, in: src))
+            let cliHits = forbiddenCLIWordRegex.matches(in: src, range: NSRange(src.startIndex..<src.endIndex, in: src))
+            #expect(codeHits.isEmpty && cliHits.isEmpty, "Forbidden internal code in \(relPath)")
+        }
+
+        // 2. Render populated workbench & SessionWorkReceiptSheet and verify accessibility strings
+        let sess = WorkStatusSessionReceipt(
+            sessionUID: "sw:a1b2c3d4e5f6",
+            sessionIDShort: "a1b2c3d4",
+            roleKey: "m1",
+            roleLabelZh: "主控编排",
+            roleLabelEn: "Goal Lead",
+            modelID: "gemini-4-carbon",
+            summaryLabel: "收敛 M1 编排与 SKILL.md 调用",
+            cstDay: "2026-11-27",
+            durationSec: 840,
+            turnCount: 9,
+            totalTokens: 96_000,
+            skillsUsed: [
+                WorkStatusSessionSkillTouch(skill: "team-lead", usedReference: true, usedScript: true),
+                WorkStatusSessionSkillTouch(skill: "my-designer", usedReference: false, usedScript: false),
+            ],
+            actionSplit: WorkStatusActionSplit(searchReadCalls: 5, codeEditCalls: 8, verifyScriptCalls: 3, spinReworkCalls: 1),
+            outputs: WorkStatusSessionOutputs(filesChangedCount: 4, commitsCount: 1, prNumber: 254)
+        )
+        let goal = WorkStatusGoalRow(
+            goalID: "atlas-goal-1",
+            title: "三段式工作台收敛",
+            repo: "Atlas/UI",
+            status: "active",
+            reviewRoundBadge: "R1",
+            durationSec: 1440,
+            turnCount: 12,
+            totalTokens: 140_000,
+            skillsUsed: [
+                WorkStatusGoalSkillTouch(skill: "team-lead", sessionLoads: 2, referenceSessions: 1, scriptSessions: 2),
+                WorkStatusGoalSkillTouch(skill: "my-designer", sessionLoads: 1, referenceSessions: 0, scriptSessions: 0),
+            ],
+            actionSplit: WorkStatusActionSplit(searchReadCalls: 6, codeEditCalls: 9, verifyScriptCalls: 4, spinReworkCalls: 1),
+            outputs: WorkStatusGoalOutputs(filesChangedCount: 6, commitsCount: 2, prNumber: 254, sessionCount: 2),
+            aiSignals: [
+                WorkStatusAISignal(kind: "empty_skill_load", severity: "warning", labelZh: "技能空载提醒：my-designer 未命中脚本", labelEn: "Unused skill load")
+            ],
+            sessions: [sess]
+        )
+        var summary = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+        summary.workStatus = WorkStatusWorkbenchSnapshot(
+            windowCST: "14d", sourceAsOf: "2026-11-27", sampleSize: 2, coverageStatus: "healthy",
+            pulse: WorkStatusPulseSummary(goalsCount: 1, bucketsCount: 1, sessionsCount: 2, durationSec: 1440, totalTokens: 140_000, filesChangedCount: 6, commitsCount: 2, prsTouchedCount: 1, actionSplit: goal.actionSplit),
+            goals: [goal]
+        )
+
+        let workbenchHosting = NSHostingView(
+            rootView: GoalWorkStreamWorkbenchView(summary: summary)
+                .frame(width: 1080)
+                .environment(\.colorScheme, .dark)
+                .environment(\.theme, Theme(isDark: true))
+        )
+        workbenchHosting.frame = NSRect(x: 0, y: 0, width: 1080, height: 760)
+        workbenchHosting.layoutSubtreeIfNeeded()
+        let wbAX = collectAccessibilityStrings(from: workbenchHosting).joined(separator: " ")
+        #expect(forbiddenCodeRegex.matches(in: wbAX, range: NSRange(wbAX.startIndex..<wbAX.endIndex, in: wbAX)).isEmpty)
+        #expect(forbiddenCLIWordRegex.matches(in: wbAX, range: NSRange(wbAX.startIndex..<wbAX.endIndex, in: wbAX)).isEmpty)
+
+        let sheetHosting = NSHostingView(
+            rootView: SessionWorkReceiptSheet(
+                presentation: SessionReceiptPresentation(goalTitle: goal.title, goalRepo: goal.repo, session: sess)
+            )
+            .environment(\.colorScheme, .dark)
+            .environment(\.theme, Theme(isDark: true))
+        )
+        sheetHosting.frame = NSRect(x: 0, y: 0, width: 580, height: 430)
+        sheetHosting.layoutSubtreeIfNeeded()
+        let sheetAX = collectAccessibilityStrings(from: sheetHosting).joined(separator: " ")
+        #expect(forbiddenCodeRegex.matches(in: sheetAX, range: NSRange(sheetAX.startIndex..<sheetAX.endIndex, in: sheetAX)).isEmpty)
+        #expect(forbiddenCLIWordRegex.matches(in: sheetAX, range: NSRange(sheetAX.startIndex..<sheetAX.endIndex, in: sheetAX)).isEmpty)
+    }
 }
 #endif

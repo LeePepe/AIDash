@@ -527,10 +527,13 @@ public struct ActionItemsCardView: View {
                 case .decision:
                     VStack(alignment: .leading, spacing: 6) {
                     ForEach(Array(item.decisionOptions.prefix(2).enumerated()), id: \.offset) { index, option in
+                        let optionTitle = store.stagedTopicDecisions[item.id] == option
+                            ? DashboardL10n.format("dashboard.actions.selected_option_format", "✓ %@", option)
+                            : option
                         Button {
                             store.stageTopicDecision(item, decision: option)
                         } label: {
-                            Text(store.stagedTopicDecisions[item.id] == option ? "✓ \(option)" : option)
+                            Text(optionTitle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .modifier(KanbanButtonStyleModifier(prominent: store.stagedTopicDecisions[item.id] == option || (store.stagedTopicDecisions[item.id] == nil && index == 0)))
@@ -592,10 +595,13 @@ public struct ActionItemsCardView: View {
     }
 
     private func evalFooterButton(_ item: DashboardActionItem, title: String, decision: String, prominent: Bool) -> some View {
-        Button {
+        let evalLabel = store.stagedTopicDecisions[item.id] == decision
+            ? DashboardL10n.format("dashboard.actions.selected_option_format", "✓ %@", title)
+            : title
+        return Button {
             store.stageTopicDecision(item, decision: decision)
         } label: {
-            Text(store.stagedTopicDecisions[item.id] == decision ? "✓ \(title)" : title)
+            Text(evalLabel)
                 .frame(maxWidth: .infinity)
         }
         .modifier(KanbanButtonStyleModifier(prominent: store.stagedTopicDecisions[item.id] == decision || prominent))
@@ -678,16 +684,17 @@ public struct ActionItemsCardView: View {
                     store.selectedActionDomain = store.selectedActionDomain == domain ? nil : domain
                 } label: {
                     HStack(spacing: 7) {
+                        let domainSubID = "domain-subtitle-" + domain.id
                         Image(systemName: domain.symbolName)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(domain.title).font(.caption.weight(.semibold))
                             Text(domain.subtitle).font(.subheadline).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .captureDashboardGeometry(id: "domain-subtitle-\(domain.id)", role: "domainSubtitle")
+                                .captureDashboardGeometry(id: domainSubID, role: "domainSubtitle")
                         }
                         Spacer(minLength: 2)
-                        Text("\(count)").font(.caption.monospacedDigit().weight(.bold)).fixedSize(horizontal: true, vertical: false)
+                        Text(count.formatted(.number)).font(.caption.monospacedDigit().weight(.bold)).fixedSize(horizontal: true, vertical: false)
                     }
                     .padding(Space.gap)
                     .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
@@ -998,8 +1005,9 @@ public struct ActionItemsCardView: View {
                 }
             }
             if isExpanded {
+                let refDisplay = item.displayRefLabel ?? ""
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("\(item.sourceTag) · \(item.projectFolderName) · \(item.displayRefLabel ?? "")")
+                    Text("\(item.sourceTag) · \(item.projectFolderName) · \(refDisplay)")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if actionItemKind(item) == .evalRule {
@@ -1559,7 +1567,7 @@ public struct AIDashMacWorkspaceView: View {
                             showPreviewHostGallery = true
                         } label: {
                             Label(
-                                DashboardL10n.tr("dashboard.preview_host.open", "2×10 PreviewHost"),
+                                DashboardL10n.tr("dashboard.preview_host.open", "PreviewHost 画廊"),
                                 systemImage: "square.grid.2x2"
                             )
                         }
@@ -1749,6 +1757,9 @@ public struct AIDashMacWorkspaceView: View {
         switch section {
         case .overview, .actionItems:
             return store.pendingActionCount
+        case .goalWorkStream:
+            guard let goals = store.liveEfficiencySummary?.workStatus?.goals else { return 0 }
+            return goals.filter { !$0.isUnassignedBucket && GoalWorkStreamFilter.activeAndBlocked.matches($0) }.count
         case .scheduledPulse:
             return store.scheduledJobFrameworkSnapshot.entries.filter(\.isProblem).count
         case .systemAndCosts:
@@ -1782,7 +1793,12 @@ public struct AIDashMacWorkspaceView: View {
                 onSelectCategory: { store.toggleChartCategory($0) },
                 onClearSelection: { store.clearChartSelection() }
             )
-            RankingTableCardView(store: store)
+        case .goalWorkStream:
+            GoalWorkStreamWorkbenchView(
+                summary: store.liveEfficiencySummary,
+                isLoading: store.systemState == .loading,
+                onRefresh: { store.refreshFromProvider() }
+            )
         case .scheduledPulse:
             SystemTelemetryStripView(snapshot: snapshot)
         case .agentEfficiency:
@@ -1791,7 +1807,7 @@ public struct AIDashMacWorkspaceView: View {
             ContentUnavailableView(
                 DashboardL10n.tr("dashboard.section.retired.title", "Workspace moved"),
                 systemImage: "arrow.right.circle",
-                description: Text(DashboardL10n.tr("dashboard.section.retired.subtitle", "This surface is now managed from the two observatory tabs."))
+                description: Text(DashboardL10n.tr("dashboard.section.retired.subtitle", "This surface is now managed from the three workbench sections."))
             )
         case .systemAndCosts:
             SystemTelemetryStripView(snapshot: snapshot)
