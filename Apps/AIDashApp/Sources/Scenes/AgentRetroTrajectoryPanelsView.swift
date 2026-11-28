@@ -64,27 +64,15 @@ public struct AgentRetroTrajectoryPanelsView: View {
     private func partialCoverageStrip(retro: AgentRetroWorkbenchSummary) -> some View {
         HStack(spacing: 8) {
             HStack(spacing: 5) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.caption2)
-                    .accessibilityHidden(true)
+                Image(systemName: "exclamationmark.triangle.fill").font(.caption2).accessibilityHidden(true)
                 Text(DashboardL10n.tr("dashboard.agent_retro.coverage_partial", "Partial Sample Coverage"))
-                    .font(.caption2.weight(.semibold))
-                    .fixedSize(horizontal: true, vertical: false)
+                    .font(.caption2.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 8).padding(.vertical, 3)
             .background(theme.warning.opacity(0.14), in: Capsule())
             .foregroundStyle(theme.warningOnSubtle)
-
-            Text(DashboardL10n.format(
-                "dashboard.agent_retro.partial_detail_format",
-                "Observed %lld sessions in %@ window",
-                retro.sampleSize,
-                retro.windowCST
-            ))
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+            Text(DashboardL10n.format("dashboard.agent_retro.partial_detail_format", "Observed %lld sessions in %@ window", retro.sampleSize, retro.windowCST))
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 4)
         }
         .accessibilityElement(children: .combine)
@@ -92,29 +80,16 @@ public struct AgentRetroTrajectoryPanelsView: View {
 
     private var emptySamplesCard: some View {
         HStack(spacing: 10) {
-            Image(systemName: "waveform.path.ecg")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+            Image(systemName: "waveform.path.ecg").font(.subheadline).foregroundStyle(.secondary).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(DashboardL10n.tr("dashboard.agent_retro.empty_title", "No Trajectory Diagnostic Samples Yet"))
-                    .font(.subheadline.weight(.semibold))
-                Text(DashboardL10n.tr(
-                    "dashboard.agent_retro.empty_desc",
-                    "Trajectory health and long-horizon waste panels appear once session diagnostics are collected."
-                ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(DashboardL10n.tr("dashboard.agent_retro.empty_title", "No Trajectory Diagnostic Samples Yet")).font(.subheadline.weight(.semibold))
+                Text(DashboardL10n.tr("dashboard.agent_retro.empty_desc", "Trajectory health and long-horizon waste panels appear once session diagnostics are collected."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(theme.neutrals.inner)
-        )
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.neutrals.inner))
         .accessibilityIdentifier("dashboard.agentRetroEmptyCard")
         .accessibilityElement(children: .combine)
     }
@@ -127,48 +102,24 @@ public struct AgentRetroTrajectoryPanelsView: View {
             ? DashboardL10n.tr("dashboard.agent_retro.status_degraded", "Diagnostics Degraded")
             : DashboardL10n.tr("dashboard.agent_retro.status_missing", "Trajectory Source Uncollected")
         let descLabel = isError
-            ? DashboardL10n.tr(
-                "dashboard.agent_retro.degraded_error_desc",
-                "Trajectory diagnostic query encountered a read error; zero values are withheld to preserve metric honesty."
-            )
-            : DashboardL10n.tr(
-                "dashboard.agent_retro.degraded_missing_desc",
-                "Trajectory diagnostic warehouse table is not yet initialized; zero values are withheld."
-            )
+            ? DashboardL10n.tr("dashboard.agent_retro.degraded_error_desc", "Trajectory diagnostic query encountered a read error; zero values are withheld to preserve metric honesty.")
+            : DashboardL10n.tr("dashboard.agent_retro.degraded_missing_desc", "Trajectory diagnostic warehouse table is not yet initialized; zero values are withheld.")
         return HStack(spacing: 10) {
-            Image(systemName: isError ? "exclamationmark.octagon.fill" : "tray")
-                .font(.subheadline)
-                .foregroundStyle(tint)
-                .accessibilityHidden(true)
+            Image(systemName: isError ? "exclamationmark.octagon.fill" : "tray").font(.subheadline).foregroundStyle(tint).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(DashboardL10n.tr("dashboard.agent_retro.six_layer_title", "6-Layer Trajectory Health & Watermarks"))
-                        .font(.subheadline.weight(.semibold))
-                    Text(badgeLabel)
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(tint.opacity(0.14), in: Capsule())
-                        .foregroundStyle(textTint)
-                        .fixedSize(horizontal: true, vertical: false)
+                    Text(DashboardL10n.tr("dashboard.agent_retro.six_layer_title", "6-Layer Trajectory Health & Watermarks")).font(.subheadline.weight(.semibold))
+                    Text(badgeLabel).font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(tint.opacity(0.14), in: Capsule()).foregroundStyle(textTint).fixedSize(horizontal: true, vertical: false)
                 }
-                Text(descLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(descLabel).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(theme.neutrals.inner)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(tint.opacity(0.28), lineWidth: 1)
-        )
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.neutrals.inner))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(tint.opacity(0.28), lineWidth: 1))
         .accessibilityIdentifier("dashboard.agentRetroDegradedBanner")
         .accessibilityElement(children: .combine)
     }
@@ -179,6 +130,7 @@ public struct AgentRetroSixLayerPanelView: View {
     public let retro: AgentRetroWorkbenchSummary
     @Binding public var filter: AgentRetroWatermarkFilter
     public let locale: Locale
+    @State private var showHealthyLayers = false
     private let theme = Theme.system
 
     public init(
@@ -191,17 +143,22 @@ public struct AgentRetroSixLayerPanelView: View {
         self.locale = locale
     }
 
-    private var visibleLayers: [AgentRetroLayerRow] {
-        let base = retro.layers.isEmpty ? Self.defaultLayers : retro.layers
-        switch filter {
-        case .all:
-            return base
-        case .unconverged:
-            return base.filter { $0.postFixCount > 0 }
-        }
+    private var allLayers: [AgentRetroLayerRow] {
+        retro.layers.isEmpty ? Self.defaultLayers : retro.layers
+    }
+
+    public var anomalousLayers: [AgentRetroLayerRow] {
+        allLayers.filter { $0.postFixCount > 0 }
+    }
+
+    public var healthyLayers: [AgentRetroLayerRow] {
+        allLayers.filter { $0.postFixCount == 0 }
     }
 
     public var body: some View {
+        let anomalies = anomalousLayers
+        let healthy = healthyLayers
+
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
@@ -212,19 +169,7 @@ public struct AgentRetroSixLayerPanelView: View {
                     .font(.subheadline.weight(.bold))
                     .lineLimit(1)
                     Spacer(minLength: 4)
-                    Picker(
-                        DashboardL10n.tr("dashboard.agent_retro.filter_picker", "Layer Filter"),
-                        selection: $filter
-                    ) {
-                        ForEach(AgentRetroWatermarkFilter.allCases) { item in
-                            Text(item.title).tag(item)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(minHeight: 28)
+                    segmentedFilterBar
                 }
                 Text(DashboardL10n.format(
                     "dashboard.agent_retro.six_layer_subtitle_format",
@@ -238,11 +183,11 @@ public struct AgentRetroSixLayerPanelView: View {
                 .lineLimit(1)
             }
 
-            if visibleLayers.isEmpty {
+            if anomalies.isEmpty {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: "checkmark.circle")
                         .font(.caption)
-                        .foregroundStyle(theme.success)
+                        .foregroundStyle(theme.neutrals.text2)
                         .accessibilityHidden(true)
                     Text(DashboardL10n.tr(
                         "dashboard.agent_retro.all_converged_note",
@@ -251,13 +196,50 @@ public struct AgentRetroSixLayerPanelView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(visibleLayers) { row in
+                    ForEach(anomalies) { row in
                         layerRowView(row)
+                    }
+                }
+            }
+
+            if filter == .all && !healthy.isEmpty {
+                Button {
+                    withAnimation(.snappy(duration: 0.16)) {
+                        showHealthyLayers.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(DashboardL10n.format(
+                            "dashboard.agent_retro.healthy_collapsed_format",
+                            "%lld 层运行平稳无异常（点击展开）",
+                            healthy.count
+                        ))
+                        .font(.caption2.monospacedDigit().weight(.medium))
+                        .foregroundStyle(theme.neutrals.text2)
+                        Spacer(minLength: 4)
+                        Image(systemName: showHealthyLayers ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(theme.neutrals.text2)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .frame(minHeight: 28)
+                    .background(theme.neutrals.card.opacity(0.65), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if showHealthyLayers {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(healthy) { row in
+                            layerRowView(row)
+                        }
                     }
                 }
             }
@@ -276,15 +258,40 @@ public struct AgentRetroSixLayerPanelView: View {
         .accessibilityIdentifier("dashboard.agentRetroSixLayerPanel")
     }
 
+    private var segmentedFilterBar: some View {
+        HStack(spacing: 2) {
+            filterChip(.all)
+            filterChip(.unconverged)
+        }
+        .padding(2)
+        .background(theme.neutrals.bg, in: Capsule())
+    }
+
+    private func filterChip(_ item: AgentRetroWatermarkFilter) -> some View {
+        let isSelected = filter == item
+        return Button { filter = item } label: {
+            Text(item.title)
+                .font(.caption2.weight(isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? theme.neutrals.text1 : theme.neutrals.text2)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .frame(minHeight: 28)
+                .background(isSelected ? theme.neutrals.card : Color.clear, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func layerRowView(_ row: AgentRetroLayerRow) -> some View {
         let title = Self.localizedLayerTitle(row, locale: locale)
+        let isHealthy = row.postFixCount == 0
         let postTint: Color = {
-            if row.postFixCount == 0 { return theme.success }
+            if isHealthy { return theme.neutrals.text3 }
             if row.postFixCount <= 2 { return theme.warning }
             return theme.danger
         }()
         let postTextTint: Color = {
-            if row.postFixCount == 0 { return theme.successOnSubtle }
+            if isHealthy { return theme.text(.meta) }
             if row.postFixCount <= 2 { return theme.warningOnSubtle }
             return theme.dangerOnSubtle
         }()
@@ -293,9 +300,9 @@ public struct AgentRetroSixLayerPanelView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(isHealthy ? .secondary : .primary)
                     .lineLimit(1)
-                if let sub = layerAttributionText(row) {
+                if !isHealthy, let sub = layerAttributionText(row) {
                     Text(sub)
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -303,17 +310,19 @@ public struct AgentRetroSixLayerPanelView: View {
                 }
             }
             Spacer(minLength: 6)
-            Text(DashboardL10n.format(
-                "dashboard.agent_retro.pre_fix_badge_format",
-                "Pre-fix %lld",
-                row.preFixCount
-            ))
-            .font(.caption2.monospacedDigit().weight(.medium))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(theme.neutrals.inner, in: Capsule())
-            .foregroundStyle(theme.text(.meta))
-            .fixedSize(horizontal: true, vertical: false)
+            if !isHealthy {
+                Text(DashboardL10n.format(
+                    "dashboard.agent_retro.pre_fix_badge_format",
+                    "Pre-fix %lld",
+                    row.preFixCount
+                ))
+                .font(.caption2.monospacedDigit().weight(.medium))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(theme.neutrals.card, in: Capsule())
+                .foregroundStyle(theme.text(.meta))
+                .fixedSize(horizontal: true, vertical: false)
+            }
 
             Text(DashboardL10n.format(
                 "dashboard.agent_retro.post_fix_badge_format",
@@ -323,7 +332,7 @@ public struct AgentRetroSixLayerPanelView: View {
             .font(.caption2.monospacedDigit().weight(.semibold))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(postTint.opacity(0.15), in: Capsule())
+            .background(isHealthy ? theme.neutrals.card : postTint.opacity(0.15), in: Capsule())
             .foregroundStyle(postTextTint)
             .fixedSize(horizontal: true, vertical: false)
         }
@@ -370,19 +379,19 @@ public struct AgentRetroSixLayerPanelView: View {
 
     private func watermarkChip(_ wm: AgentRetroSkillWatermark) -> some View {
         let isClean = wm.postFixCount == 0
-        let tint = isClean ? theme.success : theme.warning
-        let textTint = isClean ? theme.successOnSubtle : theme.warningOnSubtle
+        let tint = isClean ? theme.neutrals.text3 : theme.warning
+        let textTint = isClean ? theme.text(.meta) : theme.warningOnSubtle
         let verText = wm.skillVersion ?? "v1"
-            let statText = DashboardL10n.format("dashboard.agent_retro.watermark_chip_stat_format", "%@ · New %lld", verText, wm.postFixCount)
-            return HStack(spacing: 5) {
-                Circle().fill(tint).frame(width: 6, height: 6).accessibilityHidden(true)
-                Text(wm.skill).font(.caption2.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
-                Spacer(minLength: 2)
-                Text(statText).font(.caption2.monospacedDigit().weight(.medium)).foregroundStyle(textTint).fixedSize(horizontal: true, vertical: false)
-            }
+        let statText = DashboardL10n.format("dashboard.agent_retro.watermark_chip_stat_format", "%@ · New %lld", verText, wm.postFixCount)
+        return HStack(spacing: 5) {
+            Circle().fill(tint).frame(width: 6, height: 6).accessibilityHidden(true)
+            Text(wm.skill).font(.caption2.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+            Spacer(minLength: 2)
+            Text(statText).font(.caption2.monospacedDigit().weight(.medium)).foregroundStyle(textTint).fixedSize(horizontal: true, vertical: false)
+        }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background(isClean ? theme.neutrals.card.opacity(0.65) : tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -445,12 +454,12 @@ public struct AgentHorizonWastePanelView: View {
                 wasteKPIChip(
                     title: DashboardL10n.tr("dashboard.agent_retro.savable_turns", "Savable Turns"),
                     value: "\(waste.wastedTurnsTotal)",
-                    tint: waste.wastedTurnsTotal > 0 ? theme.warning : theme.success
+                    isException: waste.wastedTurnsTotal > 0
                 )
                 wasteKPIChip(
                     title: DashboardL10n.tr("dashboard.agent_retro.savable_tokens", "Savable Context Spend"),
                     value: DashboardTokenFormatter.compact(waste.wastedTokensTotal),
-                    tint: waste.wastedTokensTotal > 0 ? theme.primary.primary : theme.success
+                    isException: false
                 )
             }
 
@@ -487,15 +496,19 @@ public struct AgentHorizonWastePanelView: View {
         .accessibilityIdentifier("dashboard.agentHorizonWastePanel")
     }
 
-    private func wasteKPIChip(title: String, value: String, tint: Color) -> some View {
+    private func wasteKPIChip(title: String, value: String, isException: Bool) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-            Text(value).font(.system(.callout, design: .rounded, weight: .bold)).monospacedDigit().foregroundStyle(tint).fixedSize(horizontal: true, vertical: false)
+            Text(value)
+                .font(.system(.callout, design: .rounded, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(isException ? theme.warningOnSubtle : theme.neutrals.text1)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(isException ? theme.warning.opacity(0.11) : theme.neutrals.card.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -511,36 +524,20 @@ public struct AgentHorizonWastePanelView: View {
 
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
                 Spacer(minLength: 4)
-                Text(DashboardL10n.format(
-                    "dashboard.agent_retro.waste_row_stat_format",
-                    "%lld turns · %@",
-                    item.wastedTurns,
-                    DashboardTokenFormatter.compact(item.wastedTokens)
-                ))
-                .font(.caption2.monospacedDigit().weight(.semibold))
-                .foregroundStyle(theme.warningOnSubtle)
-                .fixedSize(horizontal: true, vertical: false)
+                Text(DashboardL10n.format("dashboard.agent_retro.waste_row_stat_format", "%lld turns · %@", item.wastedTurns, DashboardTokenFormatter.compact(item.wastedTokens)))
+                    .font(.caption2.monospacedDigit().weight(.semibold)).foregroundStyle(theme.warningOnSubtle).fixedSize(horizontal: true, vertical: false)
             }
             HStack(spacing: 8) {
                 if !metaText.isEmpty {
-                    Text(metaText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Text(metaText).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(theme.neutrals.inner)
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(theme.warning.opacity(0.75))
-                            .frame(width: max(6, proxy.size.width * shareClamped))
+                        RoundedRectangle(cornerRadius: 2).fill(theme.neutrals.inner)
+                        RoundedRectangle(cornerRadius: 2).fill(theme.warning.opacity(0.75)).frame(width: max(6, proxy.size.width * shareClamped))
                     }
                 }
                 .frame(width: 64, height: 4)

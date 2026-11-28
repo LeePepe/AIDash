@@ -16,8 +16,8 @@ public enum Tab3GoalWorkStreamSections {
             id: "tab3-v01",
             tab: .goalWorkStream,
             badgeCode: "V01",
-            title: "双轨时间收敛 + 焦点异常置顶与按仓库折叠交付",
-            metricTags: ["一次过审率 91% ▲ +18%", "单 Goal 中位耗时 19m ▼", "重试空转 4% ▼"],
+            title: "双轨收敛 + 焦点置顶与仓库折叠",
+            metricTags: ["收敛趋势 ▲"],
             symbolName: "point.3.connected.trianglepath.dotted",
             topologySignature: "tab3-v01:dual-track-convergence+focus-top+repo-accordion+role-relay-bar"
         ),
@@ -25,8 +25,8 @@ public enum Tab3GoalWorkStreamSections {
             id: "tab3-v02",
             tab: .goalWorkStream,
             badgeCode: "V02",
-            title: "技能版本水位锚点带 + 升级前后关联 Goal 对照分栏",
-            metricTags: ["版本升级过审率 ▲ +25%", "升级后返工空转 ▼ -11%", "新版复发精确定位 ▲"],
+            title: "版本水位靶标带 + 升级前后对照分栏",
+            metricTags: ["版本提升 ▲"],
             symbolName: "arrow.triangle.branch",
             topologySignature: "tab3-v02:compact-cohort-ribbon+before-after-version-lanes+watermark-pills"
         ),
@@ -34,8 +34,8 @@ public enum Tab3GoalWorkStreamSections {
             id: "tab3-v03",
             tab: .goalWorkStream,
             badgeCode: "V03",
-            title: "仓库稳态交付手风琴 + 角色阶梯耗时账单透视",
-            metricTags: ["平稳交付按仓库折叠 ▲", "编排至审查接力占比 ▼", "单页会话账单直达 ▲"],
+            title: "仓库手风琴 + 角色阶梯微条账单",
+            metricTags: ["接力耗时 ▼"],
             symbolName: "shippingbox.and.arrow.backward.fill",
             topologySignature: "tab3-v03:dual-track-header+repo-folded-stream+timeline-step-relay"
         ),
@@ -43,8 +43,8 @@ public enum Tab3GoalWorkStreamSections {
             id: "tab3-v04",
             tab: .goalWorkStream,
             badgeCode: "V04",
-            title: "版本演进动作光谱矩阵与复发根因对照台",
-            metricTags: ["旧版遗留与新版复发分流 ▲", "重试空转 14% → 4% ▼", "角色卡点秒级高亮 ▲"],
+            title: "异常聚焦光谱矩阵与复发对照台",
+            metricTags: ["空转返工 ▼"],
             symbolName: "waveform.path.ecg.rectangle",
             topologySignature: "tab3-v04:cohort-ribbon+version-split-matrix+step-relay-spectrum"
         ),
@@ -275,19 +275,13 @@ private struct PreviewGoalWorkStreamVariantCard: View {
         let summary = LiveDashboardTelemetryReader.LiveEfficiencySummary(workStatus: previewSnap)
 
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: descriptor.symbolName)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.tint)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(theme.primary.primary)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(descriptor.title)
-                        .font(.headline.weight(.semibold))
-                    Text(descriptor.metricTags.joined(separator: "  ·  "))
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+                Text(descriptor.title)
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button {
                     withAnimation(speed.spring()) { drawerExpanded.toggle() }
@@ -302,9 +296,8 @@ private struct PreviewGoalWorkStreamVariantCard: View {
             variantComposedBody(summary: summary)
                 .id("\(descriptor.id):\(expanded)")
         }
-        .padding(14)
-        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(theme.neutrals.border.opacity(0.6), lineWidth: 1))
+        .padding(10)
+        .background(theme.neutrals.bg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder

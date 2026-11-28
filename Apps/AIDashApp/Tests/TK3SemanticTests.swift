@@ -1717,6 +1717,36 @@ struct TK3SnapshotRenderTests {
         let sheetAX = collectAccessibilityStrings(from: sheetHosting).joined(separator: " ")
         #expect(forbiddenCodeRegex.matches(in: sheetAX, range: NSRange(sheetAX.startIndex..<sheetAX.endIndex, in: sheetAX)).isEmpty)
         #expect(forbiddenCLIWordRegex.matches(in: sheetAX, range: NSRange(sheetAX.startIndex..<sheetAX.endIndex, in: sheetAX)).isEmpty)
+
+        // 3. Subtractive clarity negative assertions: no decorative status emojis & healthy retro layers fold by default
+        for tier in SkillUsageSemanticTier.allCasesForAudit {
+            for emoji in ["🔥", "🟢", "🟡", "💤"] {
+                #expect(!tier.label.contains(emoji), "SkillUsageSemanticTier must not carry decorative emoji \(emoji)")
+            }
+        }
+        for verdict in SkillEvolutionSemanticVerdict.allCasesForAudit {
+            for emoji in ["🟢", "🟠", "🔵", "✅", "⚠️"] {
+                #expect(!verdict.label.contains(emoji), "SkillEvolutionSemanticVerdict must not carry decorative emoji \(emoji)")
+            }
+        }
+
+        let retroWithOneAnomaly = AgentRetroWorkbenchSummary(
+            coverageStatus: "healthy",
+            sampleSize: 10,
+            windowCST: "14d",
+            preFixTotal: 5,
+            postFixTotal: 1,
+            layers: [
+                AgentRetroLayerRow(layerKey: "role", labelZh: "角色边界", labelEn: "Role Boundaries", preFixCount: 2, postFixCount: 0),
+                AgentRetroLayerRow(layerKey: "invoke", labelZh: "工具与参考调用", labelEn: "Tool & Reference Invocation", preFixCount: 3, postFixCount: 1),
+            ]
+        )
+        let sixLayerPanel = AgentRetroSixLayerPanelView(
+            retro: retroWithOneAnomaly,
+            filter: .constant(.all)
+        )
+        #expect(sixLayerPanel.anomalousLayers.count == 1)
+        #expect(sixLayerPanel.healthyLayers.count == 1)
     }
 }
 #endif

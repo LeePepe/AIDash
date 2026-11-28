@@ -1944,6 +1944,24 @@
         }
       }
     },
+    "dashboard.agent_retro.healthy_collapsed_format": {
+      "comment": "Subtractive UI clarity copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld healthy layers with zero anomalies (click to expand)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 层运行平稳无异常（点击展开）"
+          }
+        }
+      }
+    },
     "dashboard.agent_retro.horizon_empty": {
       "extractionState": "manual",
       "localizations": {
@@ -7336,6 +7354,24 @@
         }
       }
     },
+    "dashboard.skills_roi.collapse_details": {
+      "comment": "Subtractive UI clarity copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse Document & Quality Details"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收起文档与质检明细"
+          }
+        }
+      }
+    },
     "dashboard.skills_roi.collapse_directory": {
       "extractionState": "manual",
       "localizations": {
@@ -8420,6 +8456,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "展开全部"
+          }
+        }
+      }
+    },
+    "dashboard.skills_roi.expand_doc_quality": {
+      "comment": "Subtractive UI clarity copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expand Document & Quality Details"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展开文档与质检明细"
           }
         }
       }
@@ -12468,6 +12522,24 @@
         }
       }
     },
+    "dashboard.work_status.collapse_sessions": {
+      "comment": "Subtractive UI clarity copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收起会话明细"
+          }
+        }
+      }
+    },
     "dashboard.work_status.cov_degraded": {
       "comment": "3-Section AI Work Status Workbench UI copy.",
       "extractionState": "manual",
@@ -12626,6 +12698,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "工作流快照读取异常"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.expand_all_sessions_format": {
+      "comment": "Subtractive UI clarity copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show all %lld sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展开全部 %lld 条会话"
           }
         }
       }
@@ -13548,20 +13638,38 @@
         }
       }
     },
-    "dashboard.work_status.seg_rework": {
-      "comment": "3-Section AI Work Status Workbench UI copy.",
+    "dashboard.work_status.seg_productive": {
+      "comment": "Subtractive UI clarity copy.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Retry & Spin"
+            "value": "Productive Work"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "重试空转"
+            "value": "有效产出"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.seg_rework": {
+      "comment": "Subtractive UI clarity copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spin & Rework"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空转返工"
           }
         }
       }
@@ -13746,20 +13854,38 @@
         }
       }
     },
-    "dashboard.work_status.subtitle_empty": {
-      "comment": "3-Section AI Work Status Workbench UI copy.",
+    "dashboard.work_status.subtitle_compact_format": {
+      "comment": "Subtractive UI clarity copy.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "14-day Goal rollups, 4-segment action bars, and 1-page session work receipts"
+            "value": "%@ · %lld Goals · %lld sessions"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "近 14 天 Goal 聚合工作流、四段动作光谱与单页会话账单"
+            "value": "%@ · %lld Goals · %lld 会话"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.subtitle_empty": {
+      "comment": "Subtractive UI clarity copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "14d · 0 Goals · 0 sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "14d · 0 Goals · 0 会话"
           }
         }
       }
@@ -13945,19 +14071,19 @@
       }
     },
     "dashboard.work_status.watermark_section_title": {
-      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "comment": "Subtractive UI clarity copy.",
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Skill Version Watermarks (Legacy vs Post-Upgrade)"
+            "value": "Skill Version Watermarks"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "命中的技能版本水位（区分旧版遗留与新版复发）"
+            "value": "技能版本水位"
           }
         }
       }
