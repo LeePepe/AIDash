@@ -1097,13 +1097,30 @@ struct DashboardWorkspaceTests {
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let sample = AIDashPreviewSampleData.fallback()
         let views: [(String, AnyView)] = [
-            ("tab1-v01", AnyView(Tab1QuotasAndAgentEfficiencySections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
+            (
+                "tab1-v01",
+                AnyView(
+                    VStack(alignment: .leading, spacing: 12) {
+                        Tab1QuotasAndAgentEfficiencySections.v01(data: sample, globalExpandAll: false, speed: .quarter)
+                        Tab1QuotasAndAgentEfficiencySections.v04(data: sample, globalExpandAll: false, speed: .quarter)
+                    }
+                )
+            ),
             ("tab1-v10", AnyView(Tab1QuotasAndAgentEfficiencySections.v10(data: sample, globalExpandAll: true, speed: .quarter))),
-            ("tab3-v01", AnyView(Tab3GoalWorkStreamSections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
+            ("tab3-v01", AnyView(Tab3GoalWorkStreamSections.v01(data: sample, globalExpandAll: false, speed: .quarter))),
+            ("tab3-v01-expanded", AnyView(Tab3GoalWorkStreamSections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
             ("tab3-v02", AnyView(Tab3GoalWorkStreamSections.v02(data: sample, globalExpandAll: true, speed: .quarter))),
             ("tab3-v03", AnyView(Tab3GoalWorkStreamSections.v03(data: sample, globalExpandAll: true, speed: .quarter))),
             ("tab3-v04", AnyView(Tab3GoalWorkStreamSections.v04(data: sample, globalExpandAll: true, speed: .quarter))),
-            ("tab2-v01", AnyView(Tab2SkillsArsenalInspectorSections.v01(data: sample, globalExpandAll: true, speed: .quarter))),
+            (
+                "tab2-v01",
+                AnyView(
+                    VStack(alignment: .leading, spacing: 12) {
+                        Tab2SkillsArsenalInspectorSections.v01(data: sample, globalExpandAll: false, speed: .quarter)
+                        Tab2SkillsArsenalInspectorSections.v02(data: sample, globalExpandAll: false, speed: .quarter)
+                    }
+                )
+            ),
             ("tab2-v10", AnyView(Tab2SkillsArsenalInspectorSections.v10(data: sample, globalExpandAll: true, speed: .quarter)))
         ]
         for (name, view) in views {
@@ -3126,8 +3143,25 @@ struct DashboardWorkspaceTests {
         #expect(capturedIDs.contains("work-tier-focus-anomalies"))
         #expect(capturedIDs.contains("work-tier-repo-folded"))
         #expect(capturedIDs.contains("repo-group-Core"))
-        #expect(!capturedIDs.contains("goal-row-atlas-steady-merged")) // Folded by default!
-        #expect(capturedIDs.contains("goal-role-relay-atlas-workbench-rollout"))
+        #expect(!capturedIDs.contains("goal-row-atlas-steady-merged"))
+        #expect(!capturedIDs.contains("goal-role-relay-atlas-workbench-rollout"))
+        #expect(!capturedIDs.contains("goal-watermarks-atlas-workbench-rollout"))
+
+        let expandedRecorder = DashboardGeometryRecorder()
+        let expandedHost = NSHostingView(
+            rootView: GoalWorkStreamWorkbenchView(
+                summary: geoSum,
+                initialExpandedGoalIDs: ["atlas-workbench-rollout"]
+            )
+            .frame(width: 1200)
+            .environment(\.dashboardGeometryRecorder, expandedRecorder)
+            .coordinateSpace(name: "dashboard-canvas")
+        )
+        expandedHost.frame = NSRect(x: 0, y: 0, width: 1200, height: 920)
+        expandedHost.layoutSubtreeIfNeeded()
+        let expandedIDs = Set(expandedRecorder.samples.map(\.id))
+        #expect(expandedIDs.contains("goal-role-relay-atlas-workbench-rollout"))
+        #expect(expandedIDs.contains("goal-watermarks-atlas-workbench-rollout"))
 
         // Verify cohort focus mode splits pre/post Goal samples
         let cohortRecorder = DashboardGeometryRecorder()
@@ -3330,6 +3364,22 @@ struct DashboardWorkspaceTests {
             luminanceByState[stateName] = (light: stateLightLum, dark: stateDarkLum)
             #expect(stateLightLum > 0.75, "Expected bright OS .aqua canvas for \(stateName), got \(stateLightLum)")
             #expect(stateDarkLum < 0.15, "Expected dark OS .darkAqua canvas for \(stateName) without manual Theme(isDark:), got \(stateDarkLum)")
+        }
+
+        if configuredDir != nil {
+            let expandedView = GoalWorkStreamWorkbenchView(
+                summary: populatedSum,
+                initialExpandedGoalIDs: ["atlas-workbench-rollout"]
+            )
+            .padding(20)
+            .frame(width: 1280, alignment: .topLeading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minHeight: 400, alignment: .topLeading)
+            .background(Theme.system.neutrals.bg)
+            .environment(\.colorScheme, .dark)
+            let expandedBitmap = try toolbarHeaderBitmap(for: expandedView, scheme: .dark)
+            let expandedPNG = try #require(expandedBitmap.representation(using: .png, properties: [:]))
+            try expandedPNG.write(to: outDir.appendingPathComponent("goal-work-stream-populated-expanded-dark.png"))
         }
     }
 

@@ -181,35 +181,89 @@ public struct KPISummaryCardView: View {
             subtitle: DashboardL10n.tr("dashboard.card.kpi.subtitle", "Key invocations, efficiency, cost, and action status"),
             symbolName: "gauge.with.dots.needle.33percent"
         ) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 185, maximum: 300), spacing: 12)], spacing: 12) {
-                ForEach(metrics) { metric in metricTile(metric) }
+            if let primary = metrics.first {
+                GeometryReader { proxy in
+                    HStack(alignment: .center, spacing: 16) {
+                        Button {
+                            onSelectMetric?(primary.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 6) {
+                                    Text(primary.label)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: 4)
+                                    Image(systemName: primary.symbolName)
+                                        .foregroundStyle(DashboardSemanticColorPalette.color(for: primary.health))
+                                        .accessibilityHidden(true)
+                                }
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text(primary.formattedValue)
+                                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                                        .monospacedDigit()
+                                        .foregroundStyle(theme.neutrals.text1)
+                                        .contentTransition(.numericText())
+                                    if let unit = primary.unit {
+                                        Text(unit)
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                HStack(spacing: 4) {
+                                    Image(systemName: primary.direction.symbolName)
+                                        .font(.caption2.weight(.bold))
+                                    Text(primary.deltaText)
+                                        .font(.caption.monospacedDigit().weight(.semibold))
+                                }
+                                .foregroundStyle(theme.neutrals.text2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: max(0, proxy.size.width * 0.58 - 8), alignment: .leading)
+
+                        Rectangle()
+                            .fill(theme.neutrals.border.opacity(0.45))
+                            .frame(width: 1)
+
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(metrics.dropFirst().prefix(3))) { metric in
+                                summaryMetricRow(metric)
+                                if metric.id != metrics.dropFirst().prefix(3).last?.id {
+                                    Divider().overlay(theme.neutrals.border.opacity(0.35))
+                                }
+                            }
+                        }
+                        .frame(width: max(0, proxy.size.width * 0.42 - 8), alignment: .leading)
+                    }
+                }
+                .frame(minHeight: 118)
             }
         }
     }
 
-    private func metricTile(_ metric: KPIMetricItem) -> some View {
+    private func summaryMetricRow(_ metric: KPIMetricItem) -> some View {
         let semanticColor = DashboardSemanticColorPalette.color(for: metric.health)
         return Button {
             onSelectMetric?(metric.id)
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text(metric.label).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Image(systemName: metric.symbolName).foregroundStyle(semanticColor).accessibilityHidden(true)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(metric.formattedValue).font(.system(.title, design: .rounded, weight: .semibold)).monospacedDigit().contentTransition(.numericText())
-                    if let unit = metric.unit { Text(unit).font(.caption).monospacedDigit().foregroundStyle(.secondary) }
-                }
-                HStack(spacing: 4) {
-                    Image(systemName: metric.direction.symbolName).font(.caption2.weight(.bold)).foregroundStyle(semanticColor)
-                    Text(metric.deltaText).font(.caption).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
-                }
+            HStack(spacing: 6) {
+                Text(metric.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(metric.formattedValue)
+                    .font(.system(size: 16, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(theme.neutrals.text1)
+                Text(metric.deltaText)
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(semanticColor)
+                    .lineLimit(1)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.neutrals.inner))
+            .frame(minHeight: 34)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -846,107 +900,108 @@ public struct AgentEfficiencyChartsCardView: View {
         let execPct = steeringPct.map { max(0, 100 - $0) }
         let tokenSplitValue = steeringPct.map { "\($0)% / \(execPct ?? 0)%" } ?? "—"
 
-        return LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(minimum: 195), spacing: 10), count: 4),
-            spacing: 10
-        ) {
-            kpiTile(
-                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_first_pass", "First-Pass Review Rate"),
-                value: passRateText,
-                detail: DashboardL10n.format(
-                    "dashboard.agent_efficiency.kpi_first_pass_detail_format",
-                    "%lld of %lld evaluated tasks",
-                    round.r1Count,
-                    round.evaluatedTasks
-                ),
-                symbol: "checkmark.seal.fill",
-                health: passHealth
-            )
-            kpiTile(
-                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_multi_round", "Multi-Round Rework Tasks"),
-                value: "\(multiRoundTotal)",
-                detail: DashboardL10n.format(
-                    "dashboard.agent_efficiency.kpi_multi_round_detail_format",
-                    "r2: %lld · r3+: %lld",
-                    round.r2Count,
-                    round.r3PlusCount
-                ),
-                symbol: "arrow.triangle.2.circlepath",
-                health: multiHealth
-            )
-            kpiTile(
-                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_stage_duration", "Stage Duration (Median / P90)"),
-                value: "\(medText) / \(p90Text)",
-                detail: round.ttftP90Sec.map {
-                    DashboardL10n.format(
-                        "dashboard.agent_efficiency.kpi_ttft_detail_format",
-                        "Gateway P90 TTFT %.1fs",
-                        $0
+        let firstPassDetail = DashboardL10n.format(
+            "dashboard.agent_efficiency.kpi_first_pass_detail_format",
+            "%lld of %lld evaluated tasks",
+            round.r1Count,
+            round.evaluatedTasks
+        )
+        let multiRoundDetail = DashboardL10n.format(
+            "dashboard.agent_efficiency.kpi_multi_round_detail_format",
+            "r2: %lld · r3+: %lld",
+            round.r2Count,
+            round.r3PlusCount
+        )
+        let durationDetail = round.ttftP90Sec.map {
+            DashboardL10n.format("dashboard.agent_efficiency.kpi_ttft_detail_format", "Gateway P90 TTFT %.1fs", $0)
+        } ?? DashboardL10n.tr("dashboard.agent_efficiency.kpi_duration_detail_default", "Dispatch to completion span")
+        let tokenDetail = round.cacheHitRate.map {
+            DashboardL10n.format("dashboard.agent_efficiency.kpi_cache_detail_format", "KV Cache Hit %lld%%", Int(($0 * 100).rounded()))
+        } ?? DashboardL10n.tr("dashboard.agent_efficiency.kpi_token_split_detail_default", "Lead vs implementation token share")
+
+        return GeometryReader { proxy in
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(DashboardL10n.tr("dashboard.agent_efficiency.kpi_first_pass", "First-Pass Review Rate"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(passRateText)
+                            .font(.system(size: 40, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(theme.neutrals.text1)
+                        Text(firstPassDetail)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(theme.neutrals.text2)
+                            .lineLimit(1)
+                    }
+                    Image(systemName: passHealth.symbolName)
+                        .font(.caption)
+                        .foregroundStyle(DashboardSemanticColorPalette.color(for: passHealth))
+                }
+                .frame(width: max(0, proxy.size.width * 0.58 - 8), alignment: .leading)
+
+                Rectangle()
+                    .fill(theme.neutrals.border.opacity(0.45))
+                    .frame(width: 1)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    efficiencySecondaryRow(
+                        title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_multi_round", "Multi-Round Rework Tasks"),
+                        value: "\(multiRoundTotal)",
+                        detail: multiRoundDetail,
+                        health: multiHealth
                     )
-                } ?? DashboardL10n.tr(
-                    "dashboard.agent_efficiency.kpi_duration_detail_default",
-                    "Dispatch to completion span"
-                ),
-                symbol: "timer",
-                health: .neutral
-            )
-            kpiTile(
-                title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_token_split", "Coordination vs Execution"),
-                value: tokenSplitValue,
-                detail: round.cacheHitRate.map {
-                    DashboardL10n.format(
-                        "dashboard.agent_efficiency.kpi_cache_detail_format",
-                        "KV Cache Hit %lld%%",
-                        Int(($0 * 100).rounded())
+                    Divider().overlay(theme.neutrals.border.opacity(0.35))
+                    efficiencySecondaryRow(
+                        title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_stage_duration", "Stage Duration (Median / P90)"),
+                        value: "\(medText) / \(p90Text)",
+                        detail: durationDetail,
+                        health: .neutral
                     )
-                } ?? DashboardL10n.tr(
-                    "dashboard.agent_efficiency.kpi_token_split_detail_default",
-                    "Lead vs implementation token share"
-                ),
-                symbol: "chart.pie.fill",
-                health: .healthy
-            )
+                    Divider().overlay(theme.neutrals.border.opacity(0.35))
+                    efficiencySecondaryRow(
+                        title: DashboardL10n.tr("dashboard.agent_efficiency.kpi_token_split", "Coordination vs Execution"),
+                        value: tokenSplitValue,
+                        detail: tokenDetail,
+                        health: .healthy
+                    )
+                }
+                .frame(width: max(0, proxy.size.width * 0.42 - 8), alignment: .leading)
+            }
         }
+        .frame(minHeight: 118)
     }
 
-    private func kpiTile(
+    private func efficiencySecondaryRow(
         title: String,
         value: String,
         detail: String,
-        symbol: String,
         health: DashboardSemanticHealth
     ) -> some View {
         let tint = DashboardSemanticColorPalette.color(for: health)
-        return VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .top, spacing: 6) {
+        return HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 4)
-                Image(systemName: symbol)
-                    .font(.caption)
-                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            Spacer(minLength: 4)
             Text(value)
-                .font(.system(.title3, design: .rounded, weight: .bold))
+                .font(.system(size: 16, weight: .semibold))
                 .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-            Text(detail)
+                .foregroundStyle(theme.neutrals.text1)
+            Image(systemName: health.symbolName)
                 .font(.caption2)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(theme.neutrals.inner)
-        )
+        .frame(minHeight: 40)
     }
 
     private func roleDivisionPanel(_ snapshot: AgentEfficiencyWorkbenchSnapshot) -> some View {
