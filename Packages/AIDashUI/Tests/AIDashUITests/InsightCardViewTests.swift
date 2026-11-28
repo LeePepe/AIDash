@@ -188,4 +188,12 @@ struct InsightCardViewTests {
 
         #expect(view.renderedBody == longBody)
     }
+
+    @Test("collapses citation links behind expandable source pill across all sizes including hero")
+    func collapsesCitationsBehindSourcePill() throws {
+        let source = try DesignTokensComplianceTests.rendererSource(for: .insight)
+        #expect(source.contains("isCitationsExpanded"))
+        #expect(source.contains("citationsDisclosure(citations:"))
+        #expect(source.contains("个来源"))
+    }
 }

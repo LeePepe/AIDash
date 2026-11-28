@@ -69,6 +69,20 @@ struct AgentSummaryCardViewTests {
         #expect(view.payload.completed.count == 3)
     }
 
+    @Test("enforces single P0 focal stat with condensed secondary stats line instead of competing stat chips")
+    func singleFocalStatHierarchy() throws {
+        let view = AgentSummaryCardView(payload: samplePayload, size: .wide, style: .neutral)
+        #expect(view.primaryStatDisplay.value == "3")
+        #expect(view.primaryStatDisplay.label == "PRs")
+        #expect(view.secondaryStatsSummary == "Hours active 6.5")
+
+        let source = try DesignTokensComplianceTests.rendererSource(for: .agentSummary)
+        #expect(!source.contains("statChips("),
+                "AgentSummaryCardView must not render 4 equal-weight stat chips competing with primary P0")
+        #expect(!source.contains("theme.success"),
+                "AgentSummaryCardView routine checkmarks must stay monochrome neutral")
+    }
+
     // MARK: - Token compliance contract
 
     @Test("declares CardType.agentSummary so it carries the constitution badge + tint")

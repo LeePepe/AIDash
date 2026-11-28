@@ -116,6 +116,17 @@ struct StackedBarCardViewTests {
         #expect(zero.allSatisfy { $0.fraction == 0 })
     }
 
+    @Test("legend row avoids triple status encoding (no redundant StatusPill or colored status icon)")
+    func legendAvoidsTripleStatusEncoding() throws {
+        let source = try DesignTokensComplianceTests.rendererSource(for: .stackedBar)
+        #expect(!source.contains("StatusPill("),
+                "stackedBar legend must not add a redundant colored StatusPill alongside swatch + bar segment")
+        #expect(!source.contains("slice.tone?.iconName"),
+                "stackedBar legend must not add a redundant colored status icon alongside swatch + bar segment")
+        #expect(source.contains(".monospacedDigit()"),
+                "stackedBar legend percentages must use monospaced digits")
+    }
+
     // MARK: - Renderer chrome contract
 
     @Test("renderer applies the shared cardChrome and the stackedBar badge exactly once")

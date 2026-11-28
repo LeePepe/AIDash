@@ -117,6 +117,27 @@ struct TodoListCardViewTests {
         #expect(!source.contains("Divider("))
     }
 
+    @Test("strips raw machine ref strings upfront and reserves semantic color strictly for high priority")
+    func stripsRawRefsAndRestrainsPriorityColors() {
+        let itemWithRawRef = TodoListPayload.Item(
+            title: "Ship clarity",
+            priority: .medium,
+            ref: "TIA-1127",
+            category: "UI"
+        )
+        let itemOnlyRawRef = TodoListPayload.Item(
+            title: "Review PR",
+            priority: .low,
+            ref: "https://github.com/example/pr/42"
+        )
+        #expect(TodoListCardView.upfrontSubtitle(for: itemWithRawRef) == "UI")
+        #expect(TodoListCardView.upfrontSubtitle(for: itemOnlyRawRef) == nil)
+        #expect(TodoListCardView.priorityTone(for: .high) == .danger)
+        #expect(TodoListCardView.priorityTone(for: .medium) == .neutral)
+        #expect(TodoListCardView.priorityTone(for: .low) == .neutral)
+        #expect(TodoListCardView.priorityTone(for: nil) == nil)
+    }
+
     // MARK: - Spec 005 D3/D4: TodoItemRow completion toggle
 
     @Test("body materializes with onToggleDone + doneItemRefs injected, for done and not-done items alike")

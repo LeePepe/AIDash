@@ -49,6 +49,25 @@ public struct TodoListCardView: View {
 
     static let recipe = AIDashTypography.detail(for: .todoList)
 
+    /// Upfront row subtitle strips raw machine `ref` IDs/hashes/URLs (`TIA-...`, `#...`, `http...`)
+    /// and displays only clean human `category` metadata.
+    static func upfrontSubtitle(for item: TodoListPayload.Item) -> String? {
+        guard let category = item.category?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !category.isEmpty else {
+            return nil
+        }
+        return category
+    }
+
+    /// Exception-only semantic priority tone: `.high` uses `.danger`, while `.medium`/`.low` stay monochrome `.neutral`.
+    static func priorityTone(for priority: TodoListPayload.Item.Priority?) -> PillTone? {
+        switch priority {
+        case .high: return .danger
+        case .medium, .low: return .neutral
+        case nil: return nil
+        }
+    }
+
     private static let titleLabel = String(
         localized: "todo_list.title",
         defaultValue: "Tasks",
@@ -118,13 +137,8 @@ private struct TodoItemRow: View {
 
     @ViewBuilder
     private var referenceLine: some View {
-        if let ref = item.ref, !ref.isEmpty {
-            Text(ref)
-                .font(TodoListCardView.recipe.secondary)
-                .foregroundStyle(TodoListCardView.recipe.secondaryColor)
-                .fixedSize(horizontal: false, vertical: true)
-        } else if let category = item.category, !category.isEmpty {
-            Text(category)
+        if let subtitle = TodoListCardView.upfrontSubtitle(for: item) {
+            Text(subtitle)
                 .font(TodoListCardView.recipe.secondary)
                 .foregroundStyle(TodoListCardView.recipe.secondaryColor)
                 .fixedSize(horizontal: false, vertical: true)
@@ -192,12 +206,7 @@ private struct TodoItemRow: View {
     }
 
     private var priorityTone: PillTone? {
-        switch item.priority {
-        case .high: return .danger
-        case .medium: return .warning
-        case .low: return .primary
-        case nil: return nil
-        }
+        TodoListCardView.priorityTone(for: item.priority)
     }
 
     private var priorityLabel: String {

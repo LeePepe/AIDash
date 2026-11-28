@@ -193,10 +193,9 @@ private struct StackedBarTrack: View {
 
 // MARK: - StackedBarLegendRow
 //
-// One legend entry: a color swatch keyed to its slice, the label, and the
-// segment's percentage share. A semantic slice also carries its status icon so
-// the alert survives grayscale. The percentage is neutral text, never the
-// swatch color.
+// One legend entry: a single color swatch keyed to its slice, monochrome label,
+// and monospaced percentage share. Avoids triple status encoding (no redundant
+// colored icon or colored status pill alongside the swatch + bar segment).
 
 private struct StackedBarLegendRow: View {
     private let theme = Theme.system
@@ -211,22 +210,13 @@ private struct StackedBarLegendRow: View {
                 .fill(slice.color)
                 .frame(width: Self.swatch, height: Self.swatch)
                 .accessibilityHidden(true)
-            if let icon = slice.tone?.iconName {
-                Image(systemName: icon)
-                    .font(StackedBarCardView.recipe.secondary)
-                    .foregroundStyle(slice.color)
-                    .accessibilityHidden(true)
-            }
             Text(slice.label)
                 .font(StackedBarCardView.recipe.secondary)
                 .foregroundStyle(theme.neutrals.text1)
                 .lineLimit(1)
-            if let tone = slice.tone {
-                StatusPill(tone.rawValue.capitalized, tone: tone.pillTone)
-            }
             Spacer(minLength: AIDashSpace.s8)
             Text(percentText)
-                .font(StackedBarCardView.recipe.secondary)
+                .font(StackedBarCardView.recipe.secondary.monospacedDigit())
                 .foregroundStyle(theme.neutrals.text2)
                 .fixedSize(horizontal: true, vertical: false)
         }
