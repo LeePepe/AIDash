@@ -12234,6 +12234,240 @@
         }
       }
     },
+    "dashboard.work_status.cohort_after_lane": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Post-Upgrade · %@ (%lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级后样本 · %@（%lld）"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_back_stream": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to Full Stream"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回全量视图"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_before_lane": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pre-Upgrade · %@ (%lld)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "升级前样本 · %@（%lld）"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_clean": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zero Post-Upgrade Recurrence"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新版零复发"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_clear_focus": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Exit Cohort Focus"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出版本对照"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_click_hint": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click a version anchor to compare pre/post Goals"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击版本锚点聚焦前后 Goal"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_empty": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No cross-version watermark cohorts in this window yet; comparisons appear once upgraded skills touch new Goals."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前窗口暂无跨版本水位对照样本，待技能升级并关联新旧 Goal 后自动呈现。"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_focus_banner": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version Cohort Focus: %@ (%@ → %@)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本对照聚焦：%@（%@ → %@）"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_lane_empty": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No matching Goal samples in this version lane"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前时间窗口无对应版本 Goal 样本"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_recurrence_cnt": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recurred %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复发 %lld"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_sample_counts": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pre %lld · Post %lld Goals"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前 %lld · 后 %lld Goal"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.cohort_strip_title": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skill Version Cohort Comparison"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按技能版本前后对比"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.collapse_daily": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapse Daily Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收起日常会话"
+          }
+        }
+      }
+    },
     "dashboard.work_status.cov_degraded": {
       "comment": "3-Section AI Work Status Workbench UI copy.",
       "extractionState": "manual",
@@ -12392,6 +12626,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "工作流快照读取异常"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.expand_daily": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Expand on Demand"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按需展开"
           }
         }
       }
@@ -12720,6 +12972,60 @@
         }
       }
     },
+    "dashboard.work_status.metric_first_pass": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First-Pass Rate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一次过审率"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.metric_median_duration": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Median Goal Duration"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "单 Goal 中位耗时"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.metric_spin_rework": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spin & Rework Share"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试空转占比"
+          }
+        }
+      }
+    },
     "dashboard.work_status.missing_desc": {
       "comment": "3-Section AI Work Status Workbench UI copy.",
       "extractionState": "manual",
@@ -13026,6 +13332,42 @@
         }
       }
     },
+    "dashboard.work_status.repo_files_commits": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld files · %lld commits"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "改 %lld 文件 · %lld 提交"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.repo_goals_prs": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Goals · %lld PRs"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完结 %lld Goal · %lld PR"
+          }
+        }
+      }
+    },
     "dashboard.work_status.reset_filter": {
       "comment": "3-Section AI Work Status Workbench UI copy.",
       "extractionState": "manual",
@@ -13166,6 +13508,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "2-Round Converged"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.role_relay_title": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Role Relay Duration Breakdown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "角色接力耗时条"
           }
         }
       }
@@ -13422,6 +13782,78 @@
         }
       }
     },
+    "dashboard.work_status.tier_focus_calm": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No blocked or post-upgrade recurring Goals; steady deliveries are folded by repository below."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前无阻塞或新版复发撞墙 Goal，已完结交付已按仓库折叠收纳。"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.tier_focus_title": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pinned Focus (Active / Blocked / Post-Upgrade Rework)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "焦点跟进（在跑 / 阻塞 / 升级后仍返工）"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.tier_steady_repo_cnt": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Repos · %lld Goals"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 仓库 · %lld Goal"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.tier_steady_repo_title": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steady First-Pass Delivery (Folded by Repository)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "平稳一次过审交付（按项目仓库折叠）"
+          }
+        }
+      }
+    },
     "dashboard.work_status.title": {
       "comment": "3-Section AI Work Status Workbench UI copy.",
       "extractionState": "manual",
@@ -13440,6 +13872,60 @@
         }
       }
     },
+    "dashboard.work_status.trend_strip_meta": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Goals · %lld PRs · %lld Sessions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Goal · %lld PR · %lld 会话"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.trend_strip_title": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temporal Convergence"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "随时间收敛趋势"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.unassigned_summary": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld standalone sessions · %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个独立会话 · 累计 %@"
+          }
+        }
+      }
+    },
     "dashboard.work_status.visible_count": {
       "comment": "3-Section AI Work Status Workbench UI copy.",
       "extractionState": "manual",
@@ -13454,6 +13940,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 项"
+          }
+        }
+      }
+    },
+    "dashboard.work_status.watermark_section_title": {
+      "comment": "Goal & Workflow Workbench v2 UI copy.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skill Version Watermarks (Legacy vs Post-Upgrade)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命中的技能版本水位（区分旧版遗留与新版复发）"
           }
         }
       }

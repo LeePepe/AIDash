@@ -113,13 +113,19 @@ public struct PreviewVariantFeedbackBar: View {
 @MainActor
 public struct AIDashTwoTabPreviewHostBoard: View {
     @State private var activeTab: DashboardWorkspaceSection = .overview
+    @State private var selectedVariantIndex: Int = 0
     @State private var expandAll = false
     @State private var speed: PreviewSpeedMultiplier = .normal
     @State private var receiptWriter: PreviewSelectionReceiptWriter
     private let theme = Theme.system
     private let data: AIDashPreviewSampleData
 
-    public init(data: AIDashPreviewSampleData? = nil, receiptPath: URL? = nil) {
+    public init(
+        initialTab: DashboardWorkspaceSection = .overview,
+        data: AIDashPreviewSampleData? = nil,
+        receiptPath: URL? = nil
+    ) {
+        _activeTab = State(initialValue: initialTab)
         self.data = data ?? AIDashPreviewSampleData.liveOrFallback()
         _receiptWriter = State(initialValue: PreviewSelectionReceiptWriter(path: receiptPath))
     }
@@ -136,34 +142,32 @@ public struct AIDashTwoTabPreviewHostBoard: View {
     }
 
     public var body: some View {
+        let currentDescriptors = descriptors
+        let clampedIndex = currentDescriptors.isEmpty ? 0 : min(selectedVariantIndex, currentDescriptors.count - 1)
+
         VStack(spacing: 0) {
-            topBar
+            topBar(descriptors: currentDescriptors, selectedIndex: clampedIndex)
             Divider()
             ScrollView {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(minimum: 420), spacing: 14),
-                        GridItem(.flexible(minimum: 420), spacing: 14)
-                    ],
-                    spacing: 14
-                ) {
-                    ForEach(descriptors) { descriptor in
-                        variantCard(descriptor)
+                VStack(alignment: .leading, spacing: 14) {
+                    if !currentDescriptors.isEmpty {
+                        variantCard(currentDescriptors[clampedIndex])
                     }
                 }
                 .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .background(theme.neutrals.bg)
         }
-        .frame(minWidth: 1180, minHeight: 760)
+        .frame(minWidth: 1080, minHeight: 760)
     }
 
-    private var topBar: some View {
+    private func topBar(descriptors: [PreviewVariantDescriptor], selectedIndex: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AIDash PreviewHost · 三段式工作台与趋势探索画廊").font(.title3.weight(.bold))
-                    Text("Native 120Hz · 总览与进化 · Goal 与工作流 (2+1+1) · Skills 武器库").font(.caption).foregroundStyle(.secondary)
+                    Text("Native 120Hz 单视口切换 · 总览与进化 · Goal 与工作流 (2+1+1) · Skills 武器库").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 PreviewSelectionSummaryPill(receiptWriter: receiptWriter)
@@ -203,6 +207,34 @@ public struct AIDashTwoTabPreviewHostBoard: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(descriptors.enumerated()), id: \.element.id) { idx, desc in
+                        let isPicked = idx == selectedIndex
+                        Button {
+                            withAnimation(speed.spring()) {
+                                selectedVariantIndex = idx
+                            }
+                        } label: {
+                            Text("\(desc.badgeCode) · \(desc.title)")
+                                .font(.caption2.weight(isPicked ? .bold : .medium))
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .frame(minHeight: 28)
+                                .background(
+                                    isPicked ? theme.primary.primary.opacity(0.18) : theme.neutrals.inner,
+                                    in: Capsule()
+                                )
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(isPicked ? theme.primary.primary : theme.neutrals.border.opacity(0.35), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
@@ -224,7 +256,10 @@ public struct AIDashTwoTabPreviewHostBoard: View {
         )
         .contentShape(Capsule())
         .onTapGesture {
-            withAnimation(speed.spring()) { activeTab = tab }
+            withAnimation(speed.spring()) {
+                activeTab = tab
+                selectedVariantIndex = 0
+            }
         }
     }
 
@@ -268,5 +303,9 @@ public struct AIDashTwoTabPreviewHostBoard: View {
 
 #Preview("3-Section PreviewHost") {
     AIDashTwoTabPreviewHostBoard(data: .fallback())
+}
+
+#Preview("Goal & Workflow PreviewHost (Single-Viewport)") {
+    AIDashTwoTabPreviewHostBoard(initialTab: .goalWorkStream, data: .fallback())
 }
 #endif

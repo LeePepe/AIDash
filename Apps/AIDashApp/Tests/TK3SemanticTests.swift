@@ -1581,7 +1581,7 @@ struct TK3SnapshotRenderTests {
         ])
 
         let forbiddenCodeRegex = try NSRegularExpression(
-            pattern: #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
+            pattern: #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|E[1-9]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
         )
         let forbiddenCLIWordRegex = try NSRegularExpression(
             pattern: #"\b(?:python3|skill_contract\.py|skill_retro\.py|agent_retro\.py|session_id|SKILL\.md|inspector)\b"#,
@@ -1632,6 +1632,10 @@ struct TK3SnapshotRenderTests {
                 WorkStatusGoalSkillTouch(skill: "team-lead", sessionLoads: 2, referenceSessions: 1, scriptSessions: 2),
                 WorkStatusGoalSkillTouch(skill: "my-designer", sessionLoads: 1, referenceSessions: 0, scriptSessions: 0),
             ],
+            skillWatermarks: [
+                WorkStatusGoalSkillWatermark(skill: "team-lead", versionLabel: "v19", watermarkState: "post_fix_recurring"),
+                WorkStatusGoalSkillWatermark(skill: "my-designer", versionLabel: "v11", watermarkState: "pre_fix_legacy"),
+            ],
             actionSplit: WorkStatusActionSplit(searchReadCalls: 6, codeEditCalls: 9, verifyScriptCalls: 4, spinReworkCalls: 1),
             outputs: WorkStatusGoalOutputs(filesChangedCount: 6, commitsCount: 2, prNumber: 254, sessionCount: 2),
             aiSignals: [
@@ -1639,16 +1643,54 @@ struct TK3SnapshotRenderTests {
             ],
             sessions: [sess]
         )
+        let steadyGoal = WorkStatusGoalRow(
+            goalID: "atlas-goal-steady",
+            title: "常规平稳一次过审任务",
+            repo: "Atlas/UI",
+            status: "merged",
+            reviewRoundBadge: "R1",
+            durationSec: 960,
+            turnCount: 7,
+            totalTokens: 78_000,
+            skillsUsed: [WorkStatusGoalSkillTouch(skill: "aidash-metrics", sessionLoads: 1, referenceSessions: 1, scriptSessions: 1)],
+            skillWatermarks: [WorkStatusGoalSkillWatermark(skill: "aidash-metrics", versionLabel: "v6", watermarkState: "post_fix_clean")],
+            actionSplit: WorkStatusActionSplit(searchReadCalls: 3, codeEditCalls: 6, verifyScriptCalls: 3, spinReworkCalls: 0),
+            outputs: WorkStatusGoalOutputs(filesChangedCount: 3, commitsCount: 1, prNumber: 255, sessionCount: 1)
+        )
+        #expect(goal.isFocusAnomaly == true)
+        #expect(steadyGoal.focusBucket == "steady_delivered")
+        #expect(steadyGoal.isFocusAnomaly == false)
+
         var summary = LiveDashboardTelemetryReader.LiveEfficiencySummary()
         summary.workStatus = WorkStatusWorkbenchSnapshot(
-            windowCST: "14d", sourceAsOf: "2026-11-27", sampleSize: 2, coverageStatus: "healthy",
-            pulse: WorkStatusPulseSummary(goalsCount: 1, bucketsCount: 1, sessionsCount: 2, durationSec: 1440, totalTokens: 140_000, filesChangedCount: 6, commitsCount: 2, prsTouchedCount: 1, actionSplit: goal.actionSplit),
-            goals: [goal]
+            windowCST: "14d", sourceAsOf: "2026-11-27", sampleSize: 3, coverageStatus: "healthy",
+            pulse: WorkStatusPulseSummary(goalsCount: 2, bucketsCount: 2, sessionsCount: 3, durationSec: 2400, totalTokens: 218_000, filesChangedCount: 9, commitsCount: 3, prsTouchedCount: 2, actionSplit: goal.actionSplit),
+            skillVersionCohorts: [
+                WorkStatusSkillVersionCohort(
+                    cohortID: "team-lead:v18->v19",
+                    skill: "team-lead",
+                    previousVersion: "v18",
+                    currentVersion: "v19",
+                    beforeGoalsCount: 1,
+                    afterGoalsCount: 1,
+                    beforeFirstPassPct: 50.0,
+                    afterFirstPassPct: 100.0,
+                    beforeReworkPct: 14.0,
+                    afterReworkPct: 4.0,
+                    postFixRecurrenceCount: 1,
+                    beforeGoalIDs: ["atlas-goal-steady"],
+                    afterGoalIDs: ["atlas-goal-1"]
+                )
+            ],
+            goals: [goal, steadyGoal]
         )
 
+        let workbenchRecorder = DashboardGeometryRecorder()
         let workbenchHosting = NSHostingView(
             rootView: GoalWorkStreamWorkbenchView(summary: summary)
                 .frame(width: 1080)
+                .environment(\.dashboardGeometryRecorder, workbenchRecorder)
+                .coordinateSpace(name: "dashboard-canvas")
                 .environment(\.colorScheme, .dark)
         )
         workbenchHosting.appearance = NSAppearance(named: .darkAqua)
@@ -1657,6 +1699,11 @@ struct TK3SnapshotRenderTests {
         let wbAX = collectAccessibilityStrings(from: workbenchHosting).joined(separator: " ")
         #expect(forbiddenCodeRegex.matches(in: wbAX, range: NSRange(wbAX.startIndex..<wbAX.endIndex, in: wbAX)).isEmpty)
         #expect(forbiddenCLIWordRegex.matches(in: wbAX, range: NSRange(wbAX.startIndex..<wbAX.endIndex, in: wbAX)).isEmpty)
+        // Negative assertion: steady first-pass delivered goal is folded into repo card by default, not rendered as a loose row
+        let wbRenderedIDs = Set(workbenchRecorder.samples.map(\.id))
+        #expect(wbRenderedIDs.contains("goal-row-atlas-goal-1"))
+        #expect(wbRenderedIDs.contains("repo-group-UI"))
+        #expect(!wbRenderedIDs.contains("goal-row-atlas-goal-steady"))
 
         let sheetHosting = NSHostingView(
             rootView: SessionWorkReceiptSheet(

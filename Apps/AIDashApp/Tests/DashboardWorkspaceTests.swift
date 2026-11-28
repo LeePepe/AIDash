@@ -1107,21 +1107,18 @@ struct DashboardWorkspaceTests {
             ("tab2-v10", AnyView(Tab2SkillsArsenalInspectorSections.v10(data: sample, globalExpandAll: true, speed: .quarter)))
         ]
         for (name, view) in views {
+            let renderWidth: CGFloat = name.hasPrefix("tab3-") ? 1020 : 760
             for scheme in [ColorScheme.dark, ColorScheme.light] {
-                let appearance = try #require(NSAppearance(named: scheme == .dark ? .darkAqua : .aqua))
-                var renderedImage: NSImage?
-                appearance.performAsCurrentDrawingAppearance {
-                    let renderer = ImageRenderer(content: view
-                        .frame(width: 760, alignment: .topLeading)
+                let bmp = try toolbarHeaderBitmap(
+                    for: view
+                        .frame(width: renderWidth, alignment: .topLeading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(16)
                         .background(Theme.system.neutrals.bg)
-                        .environment(\.colorScheme, scheme))
-                    renderer.scale = 2
-                    renderedImage = renderer.nsImage
-                }
-                let image = try #require(renderedImage)
-                let tiff = try #require(image.tiffRepresentation)
-                let png = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+                        .environment(\.colorScheme, scheme),
+                    scheme: scheme
+                )
+                let png = try #require(bmp.representation(using: .png, properties: [:]))
                 let suffix = scheme == .dark ? "dark" : "light"
                 let fileURL = output.appendingPathComponent("preview-\(name)-\(suffix).png")
                 try png.write(to: fileURL)
@@ -2748,14 +2745,14 @@ struct DashboardWorkspaceTests {
           "sample_size": 5,
           "coverage_status": "healthy",
           "pulse": {
-            "goals_count": 2,
-            "buckets_count": 3,
-            "sessions_count": 5,
-            "duration_sec": 3420.0,
-            "total_tokens": 412000,
-            "files_changed_count": 14,
-            "commits_count": 5,
-            "prs_touched_count": 2,
+            "goals_count": 3,
+            "buckets_count": 4,
+            "sessions_count": 6,
+            "duration_sec": 4380.0,
+            "total_tokens": 490000,
+            "files_changed_count": 18,
+            "commits_count": 7,
+            "prs_touched_count": 3,
             "action_split": {
               "total_calls": 40,
               "search_read_calls": 12,
@@ -2768,6 +2765,72 @@ struct DashboardWorkspaceTests {
               "spin_rework_pct": 5.0
             }
           },
+          "trend_summary": {
+            "first_pass_rate_pct": 66.7,
+            "first_pass_delta_pct": 33.4,
+            "median_goal_duration_sec": 1260.0,
+            "median_duration_delta_sec": -240.0,
+            "spin_rework_pct": 5.0,
+            "spin_rework_delta_pct": -6.2
+          },
+          "time_series": [
+            {"day": "2026-11-24", "goals_completed": 1, "first_pass_rate": 50.0, "median_goal_duration_sec": 1500.0, "spin_rework_pct": 11.2, "sessions_count": 2},
+            {"day": "2026-11-26", "goals_completed": 1, "first_pass_rate": 75.0, "median_goal_duration_sec": 1260.0, "spin_rework_pct": 6.4, "sessions_count": 2},
+            {"day": "2026-11-27", "goals_completed": 2, "first_pass_rate": 100.0, "median_goal_duration_sec": 1140.0, "spin_rework_pct": 4.2, "sessions_count": 2}
+          ],
+          "skill_version_cohorts": [
+            {
+              "cohort_id": "team-lead:v18->v19",
+              "skill": "team-lead",
+              "previous_version": "v18",
+              "current_version": "v19",
+              "watermark_sha": "1a2b3c4",
+              "before_goals_count": 2,
+              "after_goals_count": 4,
+              "before_first_pass_pct": 50.0,
+              "after_first_pass_pct": 88.0,
+              "first_pass_delta_pct": 38.0,
+              "before_rework_pct": 12.5,
+              "after_rework_pct": 4.2,
+              "rework_delta_pct": -8.3,
+              "before_median_duration_sec": 1560.0,
+              "after_median_duration_sec": 1140.0,
+              "post_fix_recurrence_count": 1,
+              "before_goal_ids": ["atlas-data-contract"],
+              "after_goal_ids": ["atlas-workbench-rollout", "atlas-steady-merged"]
+            },
+            {
+              "cohort_id": "aidash-metrics:v5->v6",
+              "skill": "aidash-metrics",
+              "previous_version": "v5",
+              "current_version": "v6",
+              "before_goals_count": 2,
+              "after_goals_count": 3,
+              "before_first_pass_pct": 67.0,
+              "after_first_pass_pct": 100.0,
+              "first_pass_delta_pct": 33.0,
+              "before_rework_pct": 9.0,
+              "after_rework_pct": 0.0,
+              "rework_delta_pct": -9.0,
+              "post_fix_recurrence_count": 0,
+              "before_goal_ids": ["atlas-data-contract"],
+              "after_goal_ids": ["atlas-workbench-rollout"]
+            }
+          ],
+          "repo_delivered_groups": [
+            {
+              "repo": "Core",
+              "goals_count": 1,
+              "prs_count": 1,
+              "first_pass_count": 1,
+              "first_pass_rate_pct": 100.0,
+              "total_duration_sec": 960.0,
+              "median_duration_sec": 960.0,
+              "files_changed_count": 4,
+              "commits_count": 2,
+              "goal_ids": ["atlas-steady-merged"]
+            }
+          ],
           "goals": [
             {
               "goal_id": "atlas-workbench-rollout",
@@ -2800,6 +2863,43 @@ struct DashboardWorkspaceTests {
                   "empty_load": true
                 }
               ],
+              "skill_watermarks": [
+                {
+                  "skill": "team-lead",
+                  "version_label": "v19",
+                  "watermark_state": "post_fix_recurring",
+                  "summary_zh": "v19 新版仍复发",
+                  "summary_en": "v19 post-upgrade recurrence",
+                  "label_zh": "team-lead v19 · 新版仍复发",
+                  "label_en": "team-lead v19 · post-upgrade recurrence"
+                },
+                {
+                  "skill": "my-designer",
+                  "version_label": "v11",
+                  "watermark_state": "pre_fix_legacy",
+                  "summary_zh": "v11 旧版修复前遗留",
+                  "summary_en": "v11 pre-upgrade legacy",
+                  "label_zh": "my-designer v11 · 旧版修复前遗留",
+                  "label_en": "my-designer v11 · pre-upgrade legacy"
+                },
+                {
+                  "skill": "aidash-metrics",
+                  "version_label": "v6",
+                  "watermark_state": "post_fix_clean",
+                  "summary_zh": "v6 新版已收敛",
+                  "summary_en": "v6 post-upgrade converged",
+                  "label_zh": "aidash-metrics v6 · 新版已收敛",
+                  "label_en": "aidash-metrics v6 · post-upgrade converged"
+                }
+              ],
+              "role_relay": [
+                {"role_key": "m1", "role_label_zh": "主控编排", "role_label_en": "Goal Lead", "duration_sec": 300.0, "share_pct": 20.8, "session_count": 1, "rework_calls": 0},
+                {"role_key": "designer", "role_label_zh": "视觉设计", "role_label_en": "Visual Designer", "duration_sec": 240.0, "share_pct": 16.7, "session_count": 1, "rework_calls": 0},
+                {"role_key": "writer", "role_label_zh": "编码实现", "role_label_en": "Code Implementation", "duration_sec": 660.0, "share_pct": 45.8, "session_count": 1, "rework_calls": 1},
+                {"role_key": "reviewer", "role_label_zh": "独立审查", "role_label_en": "Independent Reviewer", "duration_sec": 240.0, "share_pct": 16.7, "session_count": 1, "rework_calls": 0}
+              ],
+              "focus_bucket": "active_or_blocked",
+              "is_focus_anomaly": true,
               "action_split": {
                 "total_calls": 20,
                 "search_read_calls": 6,
@@ -2943,6 +3043,27 @@ struct DashboardWorkspaceTests {
               ]
             },
             {
+              "goal_id": "atlas-steady-merged",
+              "title": "核心契约平稳一次过审交付",
+              "is_unassigned_bucket": false,
+              "repo": "Atlas/Core",
+              "status": "merged",
+              "review_round_badge": "R1",
+              "latest_activity_at": "2026-11-26T20:00:00Z",
+              "duration_sec": 960.0,
+              "turn_count": 8,
+              "total_tokens": 78000,
+              "skills_used": [
+                {"skill": "team-lead", "session_loads": 1, "reference_sessions": 1, "script_sessions": 1, "used_reference": true, "used_script": true, "empty_load": false}
+              ],
+              "focus_bucket": "steady_delivered",
+              "is_focus_anomaly": false,
+              "action_split": {"total_calls": 10, "search_read_calls": 3, "code_edit_calls": 5, "verify_script_calls": 2, "spin_rework_calls": 0, "search_read_pct": 30.0, "code_edit_pct": 50.0, "verify_script_pct": 20.0, "spin_rework_pct": 0.0},
+              "outputs": {"files_changed_count": 4, "commits_count": 2, "pr_number": 250, "session_count": 1},
+              "ai_signals": [],
+              "sessions": []
+            },
+            {
               "goal_id": "unassigned-daily",
               "title": "日常独立会话（未绑定独立 Goal）",
               "is_unassigned_bucket": true,
@@ -2967,15 +3088,61 @@ struct DashboardWorkspaceTests {
         #expect(decoded.contract == "aidash-work-status/v1")
         #expect(decoded.coverageStatus == "healthy")
         #expect(decoded.sampleSize == 5)
-        #expect(decoded.pulse.goalsCount == 2)
-        #expect(decoded.pulse.prsTouchedCount == 2)
-        #expect(decoded.goals.count == 3)
+        #expect(decoded.pulse.goalsCount == 3)
+        #expect(decoded.pulse.prsTouchedCount == 3)
+        #expect(decoded.goals.count == 4)
+        #expect(decoded.timeSeries.count == 3)
+        #expect(decoded.trendSummary.firstPassRatePct == 66.7)
+        #expect(decoded.skillVersionCohorts.first?.cohortID == "team-lead:v18->v19")
+        #expect(decoded.repoDeliveredGroups.first?.repo == "Core")
+        #expect(decoded.goals.first?.skillWatermarks.first?.watermarkState == "post_fix_recurring")
+        #expect(decoded.goals.first?.skillWatermarks.count == 3)
+        #expect(decoded.goals.first?.roleRelay.count == 4)
+        #expect(decoded.goals.first?.isFocusAnomaly == true)
+        #expect(decoded.goals[2].focusBucket == "steady_delivered")
+        #expect(decoded.goals[2].isFocusAnomaly == false)
         #expect(decoded.goals.first?.outputs.prNumber == 254)
         #expect(decoded.goals.first?.skillsUsed.count == 2)
         #expect(decoded.goals.first?.skillsUsed.last?.emptyLoad == true)
         #expect(GoalWorkStreamFilter.activeAndBlocked.matches(decoded.goals[0]) == true)
         #expect(GoalWorkStreamFilter.needsOptimization.matches(decoded.goals[0]) == true)
         #expect(GoalWorkStreamFilter.delivered.matches(decoded.goals[1]) == true)
+
+        // Verify geometry anchors for new v2 sections (trendStrip, cohortStrip, focusSection, repoFoldSection, roleRelay)
+        let geoRecorder = DashboardGeometryRecorder()
+        var geoSum = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+        geoSum.workStatus = decoded
+        let geoHost = NSHostingView(
+            rootView: GoalWorkStreamWorkbenchView(summary: geoSum)
+                .frame(width: 1200)
+                .environment(\.dashboardGeometryRecorder, geoRecorder)
+                .coordinateSpace(name: "dashboard-canvas")
+        )
+        geoHost.frame = NSRect(x: 0, y: 0, width: 1200, height: 920)
+        geoHost.layoutSubtreeIfNeeded()
+        let capturedIDs = Set(geoRecorder.samples.map(\.id))
+        #expect(capturedIDs.contains("work-convergence-trend-strip"))
+        #expect(capturedIDs.contains("work-skill-cohort-strip"))
+        #expect(capturedIDs.contains("work-tier-focus-anomalies"))
+        #expect(capturedIDs.contains("work-tier-repo-folded"))
+        #expect(capturedIDs.contains("repo-group-Core"))
+        #expect(!capturedIDs.contains("goal-row-atlas-steady-merged")) // Folded by default!
+        #expect(capturedIDs.contains("goal-role-relay-atlas-workbench-rollout"))
+
+        // Verify cohort focus mode splits pre/post Goal samples
+        let cohortRecorder = DashboardGeometryRecorder()
+        let cohortHost = NSHostingView(
+            rootView: GoalWorkStreamWorkbenchView(
+                summary: geoSum,
+                initialSelectedCohortID: "team-lead:v18->v19"
+            )
+            .frame(width: 1200)
+            .environment(\.dashboardGeometryRecorder, cohortRecorder)
+            .coordinateSpace(name: "dashboard-canvas")
+        )
+        cohortHost.frame = NSRect(x: 0, y: 0, width: 1200, height: 920)
+        cohortHost.layoutSubtreeIfNeeded()
+        #expect(Set(cohortRecorder.samples.map(\.id)).contains("work-cohort-focus-matrix"))
 
         // 1. Local + iCloud mirror freshness selection for work-status.json
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-work-status-\(UUID().uuidString)", isDirectory: true)
@@ -3048,7 +3215,9 @@ struct DashboardWorkspaceTests {
         var partialSum = LiveDashboardTelemetryReader.LiveEfficiencySummary()
         partialSum.workStatus = WorkStatusWorkbenchSnapshot(
             windowCST: "14d", sourceAsOf: "2026-11-27", sampleSize: 5, coverageStatus: "partial",
-            pulse: decoded.pulse, goals: decoded.goals
+            pulse: decoded.pulse, trendSummary: decoded.trendSummary, timeSeries: decoded.timeSeries,
+            skillVersionCohorts: decoded.skillVersionCohorts, repoDeliveredGroups: decoded.repoDeliveredGroups,
+            goals: decoded.goals
         )
         var emptySum = LiveDashboardTelemetryReader.LiveEfficiencySummary()
         emptySum.workStatus = WorkStatusWorkbenchSnapshot(sampleSize: 0, coverageStatus: "unknown")
