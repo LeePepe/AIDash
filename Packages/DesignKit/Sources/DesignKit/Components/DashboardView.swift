@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Demo dashboard proving the design language: independent KPI cards in a grid,
-/// data-viz next to numbers, colored pills, ≥3 type levels. Lives in DesignKit
-/// so it's reusable in previews and the snapshot pipeline.
+/// single-hue data-viz next to monochrome P0 numbers, and exception-only status pills.
+/// Lives in DesignKit so it's reusable in previews and the snapshot pipeline.
 public struct DashboardView: View {
     private let theme = Theme.system
     private let trend: [Double] = [12, 18, 15, 24, 21, 30, 28, 36]
@@ -16,15 +16,15 @@ public struct DashboardView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: 2), spacing: 16) {
                     Card {
                         Metric(value: "$48,250", label: "Balance", delta: ("12.4%", true))
-                        Sparkline(data: trend, color: theme.chart(0))
+                        Sparkline(data: trend, color: theme.primary.primary)
                     }
                     Card {
                         Metric(value: "1,284", label: "Active users", delta: ("3.1%", true))
-                        Sparkline(data: trend.reversed(), color: theme.chart(2))
+                        Sparkline(data: trend.reversed(), color: theme.primary.primary.opacity(0.75))
                     }
                     Card {
                         Metric(value: "$3,910", label: "Spend", delta: ("1.8%", false))
-                        Sparkline(data: [8, 14, 10, 20, 16, 12, 18, 9], color: theme.chart(4))
+                        Sparkline(data: [8, 14, 10, 20, 16, 12, 18, 9], color: theme.neutrals.text2)
                     }
                     Card {
                         HStack {
@@ -37,12 +37,16 @@ public struct DashboardView: View {
 
                 Card {
                     SectionHeader("Recent activity")
-                    ForEach(activity, id: \.title) { row in
+                    ForEach(Self.demoActivityRows, id: \.title) { row in
                         CardInner {
-                            StatusPill(row.tone.label, tone: row.tone.pill)
-                            Text(row.title).font(TypeScale.body)
+                            StatusPill(row.statusLabel, tone: row.pillTone)
+                            Text(row.title)
+                                .font(TypeScale.body)
+                                .foregroundStyle(theme.neutrals.text1)
                             Spacer()
-                            Text(row.value).font(TypeScale.num)
+                            Text(row.value)
+                                .font(TypeScale.num)
+                                .foregroundStyle(theme.neutrals.text1)
                         }
                     }
                 }
@@ -54,32 +58,19 @@ public struct DashboardView: View {
         .background(theme.neutrals.bg)
     }
 
-    private struct Row { let title: String; let value: String; let tone: Tone }
-    private enum Tone {
-        case success, primary, danger, warning
-        var label: String {
-            switch self {
-            case .success: return "success"
-            case .primary: return "primary"
-            case .danger: return "danger"
-            case .warning: return "warning"
-            }
-        }
-        var pill: PillTone {
-            switch self {
-            case .success: return .success
-            case .primary: return .primary
-            case .danger: return .danger
-            case .warning: return .warning
-            }
-        }
+    struct ActivityRow: Sendable, Equatable {
+        let title: String
+        let value: String
+        let statusLabel: String
+        let pillTone: PillTone
     }
-    private var activity: [Row] {
+
+    static var demoActivityRows: [ActivityRow] {
         [
-            Row(title: "Payment received", value: "+$1,200", tone: .success),
-            Row(title: "Subscription renewed", value: "-$29", tone: .primary),
-            Row(title: "Card declined", value: "$0", tone: .danger),
-            Row(title: "Review pending", value: "—", tone: .warning)
+            ActivityRow(title: "Payment received", value: "+$1,200", statusLabel: "settled", pillTone: .neutral),
+            ActivityRow(title: "Subscription renewed", value: "-$29", statusLabel: "routine", pillTone: .neutral),
+            ActivityRow(title: "Card declined", value: "$0", statusLabel: "blocked", pillTone: .danger),
+            ActivityRow(title: "Review pending", value: "—", statusLabel: "attention", pillTone: .warning)
         ]
     }
 }

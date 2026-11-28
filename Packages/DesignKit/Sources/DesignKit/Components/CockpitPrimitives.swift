@@ -77,6 +77,16 @@ public struct RailChip: View {
         }
     }
 
+    private var fill: Color {
+        if isSelected {
+            return accent.opacity(0.12)
+        }
+        if tone == .warning || tone == .danger {
+            return accent.opacity(0.10)
+        }
+        return theme.neutrals.inner
+    }
+
     public var body: some View {
         HStack(spacing: 6) {
             if let icon {
@@ -86,16 +96,48 @@ public struct RailChip: View {
             }
             Text(title)
                 .font(TypeScale.meta)
-                .fontWeight(.medium)
+                .fontWeight(isSelected ? .semibold : .medium)
                 .lineLimit(1)
         }
         .foregroundStyle(foreground)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background((isSelected ? accent : theme.neutrals.card).opacity(isSelected ? 0.12 : 1))
+        .background(fill)
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(theme.neutrals.border, lineWidth: 1))
+        .overlay {
+            if isSelected {
+                Capsule().stroke(accent.opacity(0.35), lineWidth: 1)
+            }
+        }
         .containerHitTarget()
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Monochromatic P0 hero numeral enforcing `UI_COCKPIT_RAINBOW_NUMERAL_NOISE`
+/// (`Theme.system.neutrals.text1` by default, monospaced digits).
+public struct CockpitPrimaryNumeral: View {
+    public static let usesMonochromePrimaryText = true
+
+    private let theme = Theme.system
+    private let value: String
+    private let unit: String?
+
+    public init(_ value: String, unit: String? = nil) {
+        self.value = value
+        self.unit = unit
+    }
+
+    public var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(value)
+                .font(TypeScale.display)
+                .foregroundStyle(theme.neutrals.text1)
+            if let unit, !unit.isEmpty {
+                Text(unit)
+                    .font(TypeScale.meta)
+                    .foregroundStyle(theme.neutrals.text2)
+            }
+        }
     }
 }

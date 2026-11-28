@@ -55,4 +55,34 @@ struct CockpitVizComponentTests {
         #expect(SegmentedGauge.unlitHeight(for: 52) == CGFloat(52) * 14 / 30)
         _ = SegmentedGauge(value: 0.5, height: 52)
     }
+
+    @Test("CardInner omits nested stroke border and relies on inner luminance contrast")
+    @MainActor
+    func cardInnerBorderlessLuminance() {
+        #expect(CardInner<Text>.hasOuterStrokeBorder == false)
+        let theme = Theme.system
+        #expect(WCAG.luminance(theme.neutrals.inner) != WCAG.luminance(theme.neutrals.card))
+        _ = Card {
+            CardInner {
+                Text("Nested row")
+            }
+        }
+    }
+
+    @Test("DashboardView and CockpitPrimaryNumeral enforce exception-only chromatic restraint")
+    @MainActor
+    func dashboardChromaticRestraint() {
+        #expect(CockpitPrimaryNumeral.usesMonochromePrimaryText == true)
+        _ = CockpitPrimaryNumeral("94.2", unit: "%")
+
+        let rows = DashboardView.demoActivityRows
+        #expect(rows.count == 4)
+        let tones = rows.map(\.pillTone)
+        // Routine/completed rows use monochrome neutral; semantic color is strictly for exceptions.
+        #expect(tones.filter { $0 == .neutral }.count == 2)
+        #expect(tones.contains(.success) == false)
+        #expect(tones.contains(.primary) == false)
+        #expect(Set(tones) == Set([.neutral, .warning, .danger]))
+        _ = DashboardView()
+    }
 }
