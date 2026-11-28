@@ -7,6 +7,7 @@ public struct InsightCardView: View {
     let size: CardSize
     let style: CardStyle
     private let theme = Theme.system
+    @State private var isCitationsExpanded = false
 
     public init(payload: InsightPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -43,28 +44,10 @@ public struct InsightCardView: View {
         }
 
         switch size {
-        case .small:
+        case .small, .medium, .wide, .hero:
             leadStatement(payload.body)
             if let citations = payload.citations, !citations.isEmpty {
-                collapsedCitations(count: citations.count)
-            }
-
-        case .medium:
-            leadStatement(payload.body)
-            if let citations = payload.citations, !citations.isEmpty {
-                collapsedCitations(count: citations.count)
-            }
-
-        case .wide:
-            leadStatement(payload.body)
-            if let citations = payload.citations, !citations.isEmpty {
-                collapsedCitations(count: citations.count)
-            }
-
-        case .hero:
-            leadStatement(payload.body)
-            if let citations = payload.citations, !citations.isEmpty {
-                citationLinks(citations: citations)
+                citationsDisclosure(citations: citations)
             }
         }
     }
@@ -104,22 +87,48 @@ public struct InsightCardView: View {
     }
 
     @ViewBuilder
-    private func collapsedCitations(count: Int) -> some View {
-        Label(
-            "\(count) source\(count == 1 ? "" : "s")",
-            systemImage: "link"
-        )
-        .font(.footnote)
-        .foregroundStyle(.secondary)
+    private func citationsDisclosure(citations: [InsightPayload.Citation]) -> some View {
+        let validCitations = safeCitations(from: citations)
+        VStack(alignment: .leading, spacing: AIDashSpace.s8) {
+            Button {
+                withAnimation(.snappy(duration: 0.16)) {
+                    isCitationsExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: AIDashSpace.s4) {
+                    Image(systemName: "link")
+                        .accessibilityHidden(true)
+                    Text("\(citations.count) 个来源")
+                    if !validCitations.isEmpty {
+                        Image(systemName: isCitationsExpanded ? "chevron.up" : "chevron.down")
+                            .accessibilityHidden(true)
+                    }
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(theme.neutrals.text2)
+                .padding(.horizontal, AIDashSpace.s8)
+                .padding(.vertical, AIDashSpace.s4)
+                .statChipSurface()
+                .frame(minHeight: AIDashSpacing.controlHitTarget)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(validCitations.isEmpty)
+
+            if isCitationsExpanded, !validCitations.isEmpty {
+                citationLinks(citations: validCitations)
+            }
+        }
     }
 
     @ViewBuilder
-    private func citationLinks(citations: [InsightPayload.Citation]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(safeCitations(from: citations), id: \.url) { citation in
+    private func citationLinks(citations: [(label: String, url: URL)]) -> some View {
+        VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+            ForEach(citations, id: \.url) { citation in
                 Link(citation.label, destination: citation.url)
                     .font(.footnote)
-                    .frame(minHeight: 44)
+                    .foregroundStyle(theme.neutrals.text2)
+                    .frame(minHeight: AIDashSpacing.controlHitTarget)
                     .contentShape(Rectangle())
             }
         }

@@ -147,7 +147,7 @@ public struct MetricCardView: View {
                     .foregroundStyle(theme.neutrals.text(.body))
                     .textCase(.uppercase)
                     .lineLimit(1)
-                if let context = item.context, !context.isEmpty {
+                if let context = visibleContext(for: item) {
                     Text(context)
                         .font(AIDashTypography.metricContext)
                         .foregroundStyle(theme.neutrals.text(.body))
@@ -298,6 +298,7 @@ public struct MetricCardView: View {
             HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s4) {
                 Text(formattedValue(item.value))
                     .font(recipe.primary)
+                    .foregroundStyle(theme.neutrals.text1)
                     .minimumScaleFactor(AIDashCardInterior.numericMinimumScaleFactor)
                     .fixedSize(horizontal: true, vertical: false)
                 if let unit = item.unit {
@@ -325,6 +326,21 @@ public struct MetricCardView: View {
                 Color.clear.frame(height: Self.pillRowHeight)
             }
         }
+    }
+
+    func visibleContext(for item: MetricPayload.Item) -> String? {
+        guard let raw = item.context?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+        if raw.caseInsensitiveCompare(item.label.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame {
+            return nil
+        }
+        // Omit redundant date-scope boilerplate already carried by the briefing masthead.
+        if ["今日", "今天", "today"].contains(raw.lowercased()) {
+            return nil
+        }
+        return raw
     }
 
     // MARK: - Data-viz (north-star §6/§7)

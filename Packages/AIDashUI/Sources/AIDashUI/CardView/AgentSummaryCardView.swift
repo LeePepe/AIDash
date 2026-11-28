@@ -50,15 +50,7 @@ public struct AgentSummaryCardView: View {
     private var smallLayout: some View {
         agentNameText
             .lineLimit(1)
-        if let prStat = payload.stats?.first(where: { $0.label == "PRs" }) {
-            Text("\(Int(prStat.value)) \(Self.prsLabel)")
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
-        } else if let firstStat = payload.stats?.first {
-            Text("\(firstStat.label): \(formattedStatValue(firstStat.value))")
-                .font(recipe.secondary)
-                .foregroundStyle(recipe.secondaryColor)
-        }
+        primaryStatHero
     }
 
     @ViewBuilder
@@ -66,9 +58,8 @@ public struct AgentSummaryCardView: View {
         agentNameText
             .lineLimit(1)
 
-        if let stats = payload.stats, !stats.isEmpty {
-            statChips(stats)
-        }
+        primaryStatHero
+        secondaryStatsLine
 
         ForEach(Array(payload.completed.prefix(2).enumerated()), id: \.offset) { _, item in
             completedRow(item)
@@ -80,9 +71,8 @@ public struct AgentSummaryCardView: View {
         agentNameText
             .lineLimit(1)
 
-        if let stats = payload.stats, !stats.isEmpty {
-            statChips(stats)
-        }
+        primaryStatHero
+        secondaryStatsLine
 
         ForEach(Array(payload.completed.prefix(5).enumerated()), id: \.offset) { _, item in
             completedRow(item)
@@ -93,34 +83,75 @@ public struct AgentSummaryCardView: View {
     private var heroLayout: some View {
         agentNameText
 
-        Text(Self.heroSubtitle)
-            .font(recipe.secondary)
-            .foregroundStyle(.secondary)
-            .italic()
+        primaryStatHero
+        secondaryStatsLine
 
         ForEach(Array(payload.completed.enumerated()), id: \.offset) { _, item in
             completedRow(item)
         }
+    }
 
-        if let stats = payload.stats, !stats.isEmpty {
-            Divider()
-            statsLayout(stats)
+    // MARK: - Single P0 focal hierarchy
+
+    var primaryStatDisplay: (value: String, label: String) {
+        if let prStat = payload.stats?.first(where: { $0.label == "PRs" }) {
+            return ("\(Int(prStat.value))", Self.prsLabel)
+        }
+        if let first = payload.stats?.first {
+            return (formattedStatValue(first.value), first.label)
+        }
+        return ("\(payload.completed.count)", "Completed")
+    }
+
+    var secondaryStatsSummary: String? {
+        guard let stats = payload.stats, stats.count > 1 else { return nil }
+        let primaryLabel = payload.stats?.first(where: { $0.label == "PRs" })?.label ?? stats.first?.label
+        let remaining = stats.filter { $0.label != primaryLabel }
+        guard !remaining.isEmpty else { return nil }
+        return remaining.prefix(3)
+            .map { "\($0.label) \(formattedStatValue($0.value))" }
+            .joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private var primaryStatHero: some View {
+        let hero = primaryStatDisplay
+        HStack(alignment: .firstTextBaseline, spacing: AIDashSpace.s8) {
+            Text(hero.value)
+                .font(.title2.weight(.bold).monospacedDigit())
+                .foregroundStyle(theme.neutrals.text1)
+                .fixedSize(horizontal: true, vertical: false)
+            Text(hero.label)
+                .font(recipe.secondary)
+                .foregroundStyle(theme.neutrals.text2)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var secondaryStatsLine: some View {
+        if let summary = secondaryStatsSummary {
+            Text(summary)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(theme.neutrals.text2)
+                .lineLimit(1)
         }
     }
 
     // MARK: - Shared text styling
 
-    private var agentNameText: Text {
+    private var agentNameText: some View {
         Text(payload.agentName)
             .font(recipe.primary)
+            .foregroundStyle(theme.neutrals.text1)
     }
 
     @ViewBuilder
     private func completedRow(_ item: AgentSummaryPayload.Completed) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(theme.success)
-                .font(.caption)
+        HStack(spacing: AIDashSpace.s8) {
+            Image(systemName: "checkmark")
+                .foregroundStyle(theme.neutrals.text2)
+                .font(.caption.weight(.semibold))
                 .accessibilityHidden(true)
             if let url = URLPolicy.validate(item.ref) {
                 Link(item.title, destination: url)
@@ -128,7 +159,7 @@ public struct AgentSummaryCardView: View {
                     .foregroundStyle(recipe.secondaryColor)
                     .lineLimit(completedRowLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(minHeight: 44)
+                    .frame(minHeight: AIDashSpacing.controlHitTarget)
                     .contentShape(Rectangle())
             } else {
                 Text(item.title)
@@ -147,64 +178,6 @@ public struct AgentSummaryCardView: View {
         switch size {
         case .small, .medium: return 1
         case .wide, .hero:    return nil
-        }
-    }
-
-    /// Battle-report stat chips shown at the TOP of the card — a horizontal
-    /// row of number-over-label chips, so agentSummary reads "stats first" and
-    /// looks distinct from a digest/insight prose card. The chip surface is a
-    /// sibling Capsule (not `.background`, which chrome guards reserve for the
-    /// shared cardChrome modifier) filled from the neutral inner token.
-    @ViewBuilder
-    private func statChips(_ stats: [AgentSummaryPayload.Stat]) -> some View {
-        HStack(spacing: AIDashSpace.s8) {
-            ForEach(Array(stats.prefix(4).enumerated()), id: \.offset) { _, stat in
-                statChip(stat)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func statChip(_ stat: AgentSummaryPayload.Stat) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(formattedStatValue(stat.value))
-                .font(.system(.title3, design: .rounded).weight(.bold))
-                .fixedSize(horizontal: true, vertical: false)
-            Text(stat.label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, AIDashSpace.s12)
-        .padding(.vertical, AIDashSpace.s8)
-        .statChipSurface()
-    }
-
-    /// Stats row that adapts to variable stat counts/labels without
-    /// horizontal overflow. Uses a wrapping grid so long labels reflow
-    /// to a new line instead of clipping.
-    @ViewBuilder
-    private func statsLayout(_ stats: [AgentSummaryPayload.Stat]) -> some View {
-        let columns = [GridItem(.adaptive(minimum: 80), spacing: 12, alignment: .leading)]
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
-                statBadge(stat)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func statBadge(_ stat: AgentSummaryPayload.Stat) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(formattedStatValue(stat.value))
-                .font(recipe.primary)
-                .fixedSize(horizontal: true, vertical: false)
-            Text(stat.label)
-                .font(recipe.secondary)
-                .foregroundStyle(.secondary)
-                .lineLimit(AIDashCardInterior.tierThreeLineLimit)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -227,13 +200,6 @@ public struct AgentSummaryCardView: View {
         defaultValue: "PRs",
         bundle: .module,
         comment: "Suffix shown after a pull-request count in the small Agent Summary card layout."
-    )
-
-    private static let heroSubtitle = String(
-        localized: "agent_summary.hero_subtitle",
-        defaultValue: "spent the day on",
-        bundle: .module,
-        comment: "Pull-quote shown under the agent name in the hero Agent Summary card layout."
     )
 }
 

@@ -227,15 +227,23 @@ struct RelationshipCardViewTests {
         #expect(evidence.rows.allSatisfy { !$0.isEmpty })
     }
 
-    @Test("the evidence rail is size-invariant — the same four rows at every geometry")
-    func evidenceRailSizeInvariant() {
+    @Test("the evidence rail is size-invariant and collapses methodology rows behind progressive disclosure")
+    func evidenceRailSizeInvariant() throws {
         let payload = Self.scatter()
-        let rows = RelationshipEvidence(payload: payload).rows
+        let evidence = RelationshipEvidence(payload: payload)
+        let rows = evidence.rows
+        #expect(evidence.methodologyRows.count == 3)
+        #expect(evidence.compactBadgeText.contains("n=34"))
         for size in CardSize.allCases {
             _ = RelationshipCardView(payload: payload, size: size, style: .neutral).body
             #expect(RelationshipEvidence(payload: payload).rows == rows,
                     "size=\(size) must not drop or reword an evidence row")
         }
+
+        let source = try DesignTokensComplianceTests.rendererSource(for: .relationship)
+        #expect(source.contains("isMethodologyExpanded"))
+        #expect(source.contains("口径与样本 ↗"))
+        #expect(source.contains("evidence.methodologyRows"))
     }
 
     // MARK: - Slope series isolation (regression: cross-entity connections)

@@ -1,10 +1,13 @@
 import SwiftUI
 import AIDashCore
+import DesignKit
 
 public struct DigestCardView: View {
     let payload: DigestPayload
     let size: CardSize
     let style: CardStyle
+    private let theme = Theme.system
+    @State private var isExpanded = false
 
     public init(payload: DigestPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -18,14 +21,32 @@ public struct DigestCardView: View {
             VStack(alignment: .leading, spacing: AIDashSpace.s8) {
                 titleText
                 subtitleText
-                bodyText(payload.body)
-                sectionsContent
+                bodyText(payload.body, clamped: !showsExpandedContent)
+                if showsExpandedContent {
+                    sectionsContent
+                }
+                if supportsDisclosure {
+                    disclosureButton
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
         }
         .cardChrome(size: size, style: style)
     }
+
+    var showsExpandedContent: Bool {
+        size == .hero || isExpanded
+    }
+
+    var supportsDisclosure: Bool {
+        guard size != .hero else { return false }
+        let hasSections = !(payload.sections?.isEmpty ?? true)
+        return hasSections || payload.body.count > Self.overviewClampThreshold
+    }
+
+    nonisolated static let overviewClampLineLimit = 2
+    nonisolated static let overviewClampThreshold = 80
 
     private var recipe: AIDashTypography.DetailRecipe {
         AIDashTypography.detail(for: .digest)
@@ -37,27 +58,49 @@ public struct DigestCardView: View {
             Text(subtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(showsExpandedContent ? nil : 1)
         }
     }
 
     private var titleText: Text {
         Text(payload.title)
             .font(.title3.weight(.semibold))
+            .foregroundStyle(theme.neutrals.text1)
     }
 
-    private func bodyText(_ text: String) -> some View {
+    private func bodyText(_ text: String, clamped: Bool = false) -> some View {
         Text(text)
             .font(recipe.secondary)
             .foregroundStyle(recipe.secondaryColor)
             .lineSpacing(recipe.secondaryLineSpacing)
+            .lineLimit(clamped ? Self.overviewClampLineLimit : nil)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var disclosureButton: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.16)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: AIDashSpace.s4) {
+                Text(isExpanded ? "收起" : "展开全文 ↗")
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(theme.neutrals.text2)
+            .padding(.horizontal, AIDashSpace.s8)
+            .padding(.vertical, AIDashSpace.s4)
+            .statChipSurface()
+            .frame(minHeight: AIDashSpacing.controlHitTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
     private var sectionsContent: some View {
-        if size == .wide || size == .hero,
-           let sections = payload.sections,
-           !sections.isEmpty {
+        if let sections = payload.sections, !sections.isEmpty {
             VStack(alignment: .leading, spacing: AIDashSpace.s16) {
                 ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
                     VStack(alignment: .leading, spacing: AIDashSpace.s8) {

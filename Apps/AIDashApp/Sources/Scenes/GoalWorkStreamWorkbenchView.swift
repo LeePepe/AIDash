@@ -245,9 +245,9 @@ public struct WorkStatusActionSplitBar: View {
             guard sumRatio > 0.001, size.width > 0, size.height > 0 else { return }
 
             let segments: [(ratio: CGFloat, color: Color)] = [
-                (srRatio, theme.chartCategorical(0)),
-                (ceRatio, theme.success),
-                (vsRatio, theme.primary.primary),
+                (srRatio, theme.primary.primary.opacity(0.32)),
+                (ceRatio, theme.primary.primary),
+                (vsRatio, theme.primary.primary.opacity(0.62)),
                 (swRatio, theme.warning),
             ].filter { $0.ratio > 0 }
             guard !segments.isEmpty else { return }
@@ -433,13 +433,13 @@ public struct RoleRelayDurationBar: View {
     private func roleColor(for key: String, hasRework: Bool) -> Color {
         if hasRework { return theme.warning }
         switch key.lowercased() {
-        case "m3", "m2": return theme.chartCategorical(2)
-        case "m1": return theme.primary.primary
-        case "explorer": return theme.chartCategorical(0)
-        case "designer": return theme.chartCategorical(3)
-        case "writer": return theme.success
-        case "reviewer": return theme.chartCategorical(1)
-        default: return theme.primary.primary
+        case "m3", "m2": return theme.primary.primary.opacity(0.32)
+        case "m1": return theme.primary.primary.opacity(0.55)
+        case "explorer": return theme.primary.primary.opacity(0.40)
+        case "designer": return theme.primary.primary.opacity(0.70)
+        case "writer": return theme.primary.primary
+        case "reviewer": return theme.primary.primary.opacity(0.82)
+        default: return theme.primary.primary.opacity(0.60)
         }
     }
 }
@@ -475,10 +475,8 @@ public struct WorkStreamConvergenceTrendStrip: View {
             return String(format: "%@%.0f%%", sign, val)
         }
         let fpTone: GoalBadgeTone = {
-            guard let d = trendSummary.firstPassDeltaPct else {
-                return trendSummary.firstPassRatePct != nil ? .success : .neutral
-            }
-            return d >= 0 ? .success : .warning
+            guard let d = trendSummary.firstPassDeltaPct else { return .neutral }
+            return d < 0 ? .warning : .neutral
         }()
 
         let durValue = trendSummary.medianGoalDurationSec.map { WorkStatusFormatter.durationText($0) } ?? "—"
@@ -488,8 +486,8 @@ public struct WorkStreamConvergenceTrendStrip: View {
             return String(format: "%@%.0fm", sign, mins)
         }
         let durTone: GoalBadgeTone = {
-            guard let d = trendSummary.medianDurationDeltaSec else { return .primary }
-            return d <= 0 ? .success : .warning
+            guard let d = trendSummary.medianDurationDeltaSec else { return .neutral }
+            return d > 0 ? .warning : .neutral
         }()
 
         let spinValue = String(format: "%.1f%%", trendSummary.spinReworkPct)
@@ -498,7 +496,7 @@ public struct WorkStreamConvergenceTrendStrip: View {
             return String(format: "%@%.1f%%", sign, val)
         }
         let spinTone: GoalBadgeTone = (trendSummary.spinReworkDeltaPct ?? 0) <= 0 && trendSummary.spinReworkPct <= 8.0
-            ? .success
+            ? .neutral
             : .warning
 
         VStack(alignment: .leading, spacing: 8) {
@@ -573,8 +571,12 @@ public struct WorkStreamConvergenceTrendStrip: View {
                         tone: spinTone
                     )
                     Spacer(minLength: 6)
-                    WorkStreamTrendMiniSparkline(values: spinSeries.isEmpty ? fpSeries : spinSeries, tint: theme.success, height: 22)
-                        .frame(width: 96)
+                    StephenFewBulletBar(
+                        currentPct: trendSummary.firstPassRatePct ?? 0,
+                        targetPct: 90.0,
+                        warningBandPct: 75.0
+                    )
+                    .frame(width: 112, height: 18)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
@@ -583,11 +585,7 @@ public struct WorkStreamConvergenceTrendStrip: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.neutrals.border.opacity(0.14), lineWidth: 1)
-        )
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .captureDashboardGeometry(id: "work-convergence-trend-strip", role: "trendStrip")
     }
 
@@ -599,8 +597,8 @@ public struct WorkStreamConvergenceTrendStrip: View {
         series: [Double],
         tone: GoalBadgeTone
     ) -> some View {
-        let fg = fgTone(tone)
-        let sparkTint = sparkColor(tone)
+        let isPrimary = id == "work-trend-first-pass"
+        let isWarning = tone == .warning
         return VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption2.weight(.semibold))
@@ -608,9 +606,9 @@ public struct WorkStreamConvergenceTrendStrip: View {
                 .lineLimit(1)
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(valueText)
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .font(.system(isPrimary ? .title3 : .headline, design: .rounded, weight: .bold))
                     .monospacedDigit()
-                    .foregroundStyle(fg)
+                    .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.neutrals.text1)
                     .lineLimit(1)
                     .layoutPriority(1)
                 if let deltaText {
@@ -618,32 +616,37 @@ public struct WorkStreamConvergenceTrendStrip: View {
                         .font(.caption2.monospacedDigit().weight(.semibold))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(bgTone(tone), in: Capsule())
-                        .foregroundStyle(fg)
+                        .background(isWarning ? theme.warning.opacity(0.15) : theme.neutrals.card, in: Capsule())
+                        .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.neutrals.text2)
                         .lineLimit(1)
                 }
             }
-            WorkStreamTrendMiniSparkline(values: series, tint: sparkTint, height: 20)
+            WorkStreamTrendMiniSparkline(
+                values: series,
+                tint: isWarning ? theme.warning : (isPrimary ? theme.primary.primary : theme.neutrals.text2),
+                height: 20
+            )
         }
         .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.neutrals.inner.opacity(0.75), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .captureDashboardGeometry(id: id, role: "trendMetric")
         .accessibilityElement(children: .combine)
     }
 
     private func compactRibbonItem(title: String, valueText: String, deltaText: String?, tone: GoalBadgeTone) -> some View {
-        HStack(spacing: 5) {
+        let isWarning = tone == .warning
+        return HStack(spacing: 5) {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(valueText)
                 .font(.caption.weight(.bold).monospacedDigit())
-                .foregroundStyle(fgTone(tone))
+                .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.neutrals.text1)
             if let deltaText {
                 Text(deltaText)
                     .font(.caption2.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(fgTone(tone))
+                    .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.neutrals.text2)
             }
         }
     }
@@ -676,6 +679,41 @@ public struct WorkStreamConvergenceTrendStrip: View {
         case .primary: return theme.primary.primary
         case .neutral: return theme.neutrals.text2
         }
+    }
+}
+
+@MainActor
+private struct StephenFewBulletBar: View {
+    let currentPct: Double
+    let targetPct: Double
+    let warningBandPct: Double
+    private let theme = Theme.system
+
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            let bgPath = RoundedRectangle(cornerRadius: 4, style: .continuous).path(in: rect)
+            context.fill(bgPath, with: .color(theme.neutrals.card))
+
+            let warnWidth = size.width * CGFloat(min(max(warningBandPct / 100.0, 0), 1))
+            context.fill(
+                Path(CGRect(x: 0, y: 0, width: warnWidth, height: size.height)),
+                with: .color(theme.warning.opacity(0.12))
+            )
+
+            let curRatio = CGFloat(min(max(currentPct / 100.0, 0), 1))
+            let barHeight = max(6, size.height * 0.44)
+            let barRect = CGRect(x: 0, y: (size.height - barHeight) / 2, width: size.width * curRatio, height: barHeight)
+            context.fill(
+                RoundedRectangle(cornerRadius: 2, style: .continuous).path(in: barRect),
+                with: .color(currentPct < warningBandPct ? theme.warning : theme.primary.primary)
+            )
+
+            let targetX = min(max(2, size.width * CGFloat(targetPct / 100.0)), size.width - 2)
+            let tickRect = CGRect(x: targetX - 1, y: 2, width: 2, height: max(4, size.height - 4))
+            context.fill(Path(tickRect), with: .color(theme.neutrals.text1))
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -758,25 +796,19 @@ public struct SkillVersionCohortComparisonStrip: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.neutrals.border.opacity(0.14), lineWidth: 1)
-        )
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .captureDashboardGeometry(id: "work-skill-cohort-strip", role: "cohortStrip")
     }
 
     private func cohortDeckButton(_ cohort: WorkStatusSkillVersionCohort) -> some View {
         let isSelected = selectedCohortID == cohort.cohortID
         let hasRecurrence = cohort.postFixRecurrenceCount > 0
-        let fpCompare: String = {
-            let bText = cohort.beforeFirstPassPct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
+        let fpDeltaText: String = {
+            if let delta = cohort.firstPassDeltaPct {
+                return String(format: "%@%.0f%%", delta >= 0 ? "▲ +" : "▼ ", delta)
+            }
             let aText = cohort.afterFirstPassPct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
-            return "过审 \(bText)→\(aText)"
-        }()
-        let rwDeltaText: String = {
-            let sign = cohort.reworkDeltaPct <= 0 ? "▼ " : "▲ +"
-            return String(format: "空转 %@%.0f%%", sign, cohort.reworkDeltaPct)
+            return aText
         }()
 
         return Button {
@@ -789,55 +821,36 @@ public struct SkillVersionCohortComparisonStrip: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text("\(cohort.previousVersion) → \(cohort.currentVersion)")
-                        .font(.caption2.monospaced().weight(.semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(theme.primary.primary.opacity(0.15), in: Capsule())
-                        .foregroundStyle(theme.primary.onPrimarySubtle)
+                        .font(.caption2.monospaced().weight(.medium))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                }
-                HStack(spacing: 6) {
-                    Text(fpCompare)
-                        .font(.caption2.monospacedDigit().weight(.medium))
-                        .foregroundStyle(.primary)
-                    Text(rwDeltaText)
-                        .font(.caption2.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(cohort.reworkDeltaPct <= 0 ? theme.successOnSubtle : theme.warningOnSubtle)
-                }
-                HStack(spacing: 6) {
-                    Text(DashboardL10n.format(
-                        "dashboard.work_status.cohort_sample_counts",
-                        "前 %lld · 后 %lld Goal",
-                        cohort.beforeGoalsCount,
-                        cohort.afterGoalsCount
-                    ))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    Text(
-                        hasRecurrence
-                            ? DashboardL10n.format("dashboard.work_status.cohort_recurrence_cnt", "复发 %lld", cohort.postFixRecurrenceCount)
-                            : DashboardL10n.tr("dashboard.work_status.cohort_clean", "新版零复发")
-                    )
-                    .font(.caption2.monospacedDigit().weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background((hasRecurrence ? theme.warning : theme.success).opacity(0.15), in: Capsule())
-                    .foregroundStyle(hasRecurrence ? theme.warningOnSubtle : theme.successOnSubtle)
+                    if hasRecurrence {
+                        Text(DashboardL10n.format("dashboard.work_status.cohort_recurrence_cnt", "复发 %lld", cohort.postFixRecurrenceCount))
+                            .font(.caption2.monospacedDigit().weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(theme.warning.opacity(0.16), in: Capsule())
+                            .foregroundStyle(theme.warningOnSubtle)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(fpDeltaText)
+                        .font(.system(.callout, design: .rounded, weight: .bold).monospacedDigit())
+                        .foregroundStyle(hasRecurrence ? theme.warningOnSubtle : theme.neutrals.text1)
+                    Text(DashboardL10n.tr("dashboard.work_status.metric_first_pass", "一次过审率"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
             .padding(9)
-            .frame(minWidth: 215, alignment: .leading)
+            .frame(minWidth: 205, alignment: .leading)
             .background(
-                isSelected ? theme.primary.primary.opacity(0.13) : theme.neutrals.inner.opacity(0.75),
+                hasRecurrence
+                    ? theme.warning.opacity(0.10)
+                    : (isSelected ? theme.primary.primary.opacity(0.13) : theme.neutrals.card),
                 in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? theme.primary.primary : theme.neutrals.border.opacity(0.2),
-                        lineWidth: isSelected ? 1.5 : 1
-                    )
             )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
@@ -855,10 +868,11 @@ public struct SkillVersionCohortComparisonStrip: View {
             HStack(spacing: 5) {
                 Text("\(cohort.skill) \(cohort.previousVersion)→\(cohort.currentVersion)")
                     .font(.caption2.weight(.semibold))
+                    .foregroundStyle(theme.neutrals.text1)
                 if let delta = cohort.firstPassDeltaPct {
                     Text(String(format: "%@%.0f%%", delta >= 0 ? "▲+" : "▼", delta))
                         .font(.caption2.monospacedDigit().weight(.bold))
-                        .foregroundStyle(delta >= 0 ? theme.successOnSubtle : theme.warningOnSubtle)
+                        .foregroundStyle(delta >= 0 ? theme.neutrals.text2 : theme.warningOnSubtle)
                 }
                 if hasRecurrence {
                     Text("复发\(cohort.postFixRecurrenceCount)")
@@ -870,12 +884,10 @@ public struct SkillVersionCohortComparisonStrip: View {
             .padding(.vertical, 5)
             .frame(minHeight: 28)
             .background(
-                isSelected ? theme.primary.primary.opacity(0.16) : theme.neutrals.inner,
+                hasRecurrence
+                    ? theme.warning.opacity(0.14)
+                    : (isSelected ? theme.primary.primary.opacity(0.15) : theme.neutrals.card),
                 in: Capsule()
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(isSelected ? theme.primary.primary : theme.neutrals.border.opacity(0.3), lineWidth: 1)
             )
             .contentShape(Capsule())
         }
@@ -959,17 +971,15 @@ public struct GoalWorkStreamWorkbenchView: View {
         guard let snap = snapshot, snap.sampleSize > 0 else {
             return DashboardL10n.tr(
                 "dashboard.work_status.subtitle_empty",
-                "近 14 天 Goal 聚合工作流、四段动作光谱与单页会话账单"
+                "14d · 0 Goals · 0 会话"
             )
         }
-        let asOf = snap.sourceAsOf ?? snap.windowEnd ?? "—"
         return DashboardL10n.format(
-            "dashboard.work_status.subtitle_format",
-            "窗口 %@ · 更新 %@ · %lld 个会话 · %lld 个活跃或归档 Goal",
+            "dashboard.work_status.subtitle_compact_format",
+            "%@ · %lld Goals · %lld 会话",
             snap.windowCST,
-            asOf,
-            snap.sampleSize,
-            snap.pulse.goalsCount
+            snap.pulse.goalsCount,
+            snap.sampleSize
         )
     }
 
@@ -992,8 +1002,8 @@ public struct GoalWorkStreamWorkbenchView: View {
             case "healthy":
                 return (
                     DashboardL10n.tr("dashboard.work_status.cov_healthy", "数据完整"),
-                    theme.successOnSubtle,
-                    theme.success.opacity(0.15)
+                    theme.text(.meta),
+                    theme.neutrals.inner
                 )
             case "partial", "loading":
                 return (
@@ -1204,11 +1214,7 @@ public struct GoalWorkStreamWorkbenchView: View {
             }
         }
         .padding(12)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.primary.primary.opacity(0.32), lineWidth: 1)
-        )
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .captureDashboardGeometry(id: "work-cohort-focus-matrix", role: "cohortMatrix")
     }
 
@@ -1269,13 +1275,13 @@ public struct GoalWorkStreamWorkbenchView: View {
                         icon: "bolt.trianglebadge.exclamationmark.fill",
                         title: DashboardL10n.tr("dashboard.work_status.tier_focus_title", "焦点跟进（在跑 / 阻塞 / 升级后仍返工）"),
                         badgeText: "\(focusGoals.count)",
-                        tint: focusGoals.isEmpty ? theme.success : theme.warning
+                        isException: !focusGoals.isEmpty
                     )
                     if focusGoals.isEmpty {
                         HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
+                            Image(systemName: "checkmark.circle")
                                 .font(.caption)
-                                .foregroundStyle(theme.success)
+                                .foregroundStyle(theme.neutrals.text2)
                                 .accessibilityHidden(true)
                             Text(DashboardL10n.tr(
                                 "dashboard.work_status.tier_focus_calm",
@@ -1287,7 +1293,7 @@ public struct GoalWorkStreamWorkbenchView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 9)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                     } else {
                         ForEach(Array(focusGoals.prefix(16))) { goal in
                             goalRowView(goal)
@@ -1309,7 +1315,7 @@ public struct GoalWorkStreamWorkbenchView: View {
                             repoGroups.count,
                             steadyGoals.count
                         ),
-                        tint: theme.success
+                        isException: false
                     )
                     ForEach(repoGroups) { group in
                         repoFoldedAccordionCard(group: group, steadyByID: steadyByID)
@@ -1327,11 +1333,11 @@ public struct GoalWorkStreamWorkbenchView: View {
         }
     }
 
-    private func sectionHeaderRow(icon: String, title: String, badgeText: String, tint: Color) -> some View {
+    private func sectionHeaderRow(icon: String, title: String, badgeText: String, isException: Bool) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
+                .foregroundStyle(isException ? theme.warning : theme.neutrals.text2)
                 .accessibilityHidden(true)
             Text(title)
                 .font(.caption.weight(.bold))
@@ -1340,8 +1346,8 @@ public struct GoalWorkStreamWorkbenchView: View {
                 .font(.caption2.monospacedDigit().weight(.semibold))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(tint.opacity(0.15), in: Capsule())
-                .foregroundStyle(tint == theme.warning ? theme.warningOnSubtle : theme.successOnSubtle)
+                .background(isException ? theme.warning.opacity(0.15) : theme.neutrals.inner, in: Capsule())
+                .foregroundStyle(isException ? theme.warningOnSubtle : theme.text(.meta))
             Spacer(minLength: 4)
         }
     }
@@ -1366,7 +1372,7 @@ private extension GoalWorkStreamWorkbenchView {
                 HStack(spacing: 10) {
                     Image(systemName: "folder.fill")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(theme.success)
+                        .foregroundStyle(theme.neutrals.text2)
                         .accessibilityHidden(true)
                     Text(group.repo)
                         .font(.subheadline.weight(.bold))
@@ -1381,8 +1387,8 @@ private extension GoalWorkStreamWorkbenchView {
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(theme.success.opacity(0.14), in: Capsule())
-                    .foregroundStyle(theme.successOnSubtle)
+                    .background(theme.neutrals.card, in: Capsule())
+                    .foregroundStyle(theme.neutrals.text2)
 
                     Text(fpText)
                         .font(.caption2.monospacedDigit().weight(.medium))
@@ -1427,11 +1433,7 @@ private extension GoalWorkStreamWorkbenchView {
                 .padding(10)
             }
         }
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.neutrals.border.opacity(0.12), lineWidth: 1)
-        )
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .captureDashboardGeometry(id: "repo-group-\(group.repo)", role: "repoAccordion")
     }
 
@@ -1503,11 +1505,7 @@ private extension GoalWorkStreamWorkbenchView {
                 .padding(8)
             }
         }
-        .background(theme.neutrals.card.opacity(0.75), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(theme.neutrals.border.opacity(0.1), lineWidth: 1)
-        )
+        .background(theme.neutrals.inner.opacity(0.72), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .captureDashboardGeometry(id: "unassigned-daily-disclosure", role: "secondaryDisclosure")
     }
 
@@ -1624,24 +1622,15 @@ private extension GoalWorkStreamWorkbenchView {
     }
 
     private func actionLegendItems(_ split: WorkStatusActionSplit, visibleCount: Int) -> some View {
-        HStack(spacing: 10) {
+        let productivePct = split.searchReadPct + split.codeEditPct + split.verifyScriptPct
+        return HStack(spacing: 10) {
             legendSwatch(
-                label: DashboardL10n.tr("dashboard.work_status.seg_search", "搜索阅读"),
-                pct: split.searchReadPct,
-                tint: theme.chartCategorical(0)
-            )
-            legendSwatch(
-                label: DashboardL10n.tr("dashboard.work_status.seg_edit", "编码产出"),
-                pct: split.codeEditPct,
-                tint: theme.success
-            )
-            legendSwatch(
-                label: DashboardL10n.tr("dashboard.work_status.seg_verify", "测试脚本"),
-                pct: split.verifyScriptPct,
+                label: DashboardL10n.tr("dashboard.work_status.seg_productive", "有效产出"),
+                pct: productivePct,
                 tint: theme.primary.primary
             )
             legendSwatch(
-                label: DashboardL10n.tr("dashboard.work_status.seg_rework", "重试空转"),
+                label: DashboardL10n.tr("dashboard.work_status.seg_rework", "空转返工"),
                 pct: split.spinReworkPct,
                 tint: theme.warning
             )
@@ -1748,11 +1737,7 @@ private extension GoalWorkStreamWorkbenchView {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.neutrals.border.opacity(0.12), lineWidth: 1)
-        )
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .accessibilityIdentifier("dashboard.goalWorkStreamEmptyCard")
     }
 
@@ -1841,6 +1826,7 @@ private struct GoalWorkStreamExpandableRow: View {
     let reduceMotion: Bool
     let onToggleExpand: () -> Void
     let onOpenSessionReceipt: (WorkStatusSessionReceipt) -> Void
+    @State private var showAllChildSessions = false
     private let theme = Theme.system
 
     init(
@@ -1878,11 +1864,7 @@ private struct GoalWorkStreamExpandableRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.neutrals.border.opacity(0.12), lineWidth: 1)
-        )
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .captureDashboardGeometry(id: "goal-row-\(goal.goalID)", role: "goalRow")
     }
 
@@ -1939,7 +1921,8 @@ private struct GoalWorkStreamExpandableRow: View {
         let s = goal.status.lowercased()
         let fill: Color = {
             if s == "blocked" { return theme.danger }
-            if ["done", "merged", "completed"].contains(s) { return theme.success }
+            if goal.actionSplit.spinReworkCalls > 0 { return theme.warning }
+            if ["done", "merged", "completed"].contains(s) { return theme.neutrals.text3 }
             if goal.isUnassignedBucket { return theme.text(.meta) }
             return theme.primary.primary
         }()
@@ -1959,20 +1942,20 @@ private struct GoalWorkStreamExpandableRow: View {
                 capsuleTag(
                     DashboardL10n.format("dashboard.work_status.files_badge", "%lld 文件", goal.outputs.filesChangedCount),
                     fg: theme.text(.body),
-                    bg: theme.neutrals.inner
+                    bg: theme.neutrals.card
                 )
             }
             if let pr = goal.outputs.prNumber {
                 capsuleTag(
                     "PR #\(pr)",
-                    fg: theme.successOnSubtle,
-                    bg: theme.success.opacity(0.15)
+                    fg: theme.text(.body),
+                    bg: theme.neutrals.card
                 )
             }
             capsuleTag(
                 DashboardL10n.format("dashboard.work_status.sessions_badge", "%lld 会话", goal.outputs.sessionCount),
-                fg: theme.primary.onPrimarySubtle,
-                bg: theme.primary.primary.opacity(0.14)
+                fg: theme.text(.meta),
+                bg: theme.neutrals.card
             )
         }
     }
@@ -1997,15 +1980,7 @@ private struct GoalWorkStreamExpandableRow: View {
         let tone: GoalBadgeTone = {
             switch wm.watermarkState {
             case "post_fix_recurring": return .warning
-            case "pre_fix_legacy": return .neutral
-            default: return .success
-            }
-        }()
-        let iconName: String = {
-            switch wm.watermarkState {
-            case "post_fix_recurring": return "exclamationmark.triangle.fill"
-            case "pre_fix_legacy": return "clock.arrow.circlepath"
-            default: return "checkmark.circle.fill"
+            default: return .neutral
             }
         }()
         let rawLabel = compact
@@ -2013,26 +1988,40 @@ private struct GoalWorkStreamExpandableRow: View {
             : (isZh ? wm.labelZh : wm.labelEn)
         let text = WorkStatusFormatter.sanitizedSummary(rawLabel) ?? rawLabel
         return HStack(spacing: 4) {
-            Image(systemName: iconName)
-                .font(.caption2)
-                .accessibilityHidden(true)
+            if wm.watermarkState == "post_fix_recurring" {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .accessibilityHidden(true)
+            }
             Text(text)
                 .font(.caption2.weight(.semibold))
                 .lineLimit(1)
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(bgColor(tone), in: Capsule())
-        .foregroundStyle(fgColor(tone))
+        .background(tone == .warning ? theme.warning.opacity(0.15) : theme.neutrals.card, in: Capsule())
+        .foregroundStyle(tone == .warning ? theme.warningOnSubtle : theme.text(.meta))
+    }
+
+    private var rankedChildSessions: [WorkStatusSessionReceipt] {
+        goal.sessions.sorted { lhs, rhs in
+            if lhs.actionSplit.spinReworkCalls != rhs.actionSplit.spinReworkCalls {
+                return lhs.actionSplit.spinReworkCalls > rhs.actionSplit.spinReworkCalls
+            }
+            return lhs.durationSec > rhs.durationSec
+        }
     }
 
     private var expandedChildSessionsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let sortedSessions = rankedChildSessions
+        let visibleSessions = showAllChildSessions ? sortedSessions : Array(sortedSessions.prefix(3))
+
+        return VStack(alignment: .leading, spacing: 8) {
             Divider()
 
             if !goal.skillWatermarks.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(DashboardL10n.tr("dashboard.work_status.watermark_section_title", "命中的技能版本水位（区分旧版遗留与新版复发）"))
+                    Text(DashboardL10n.tr("dashboard.work_status.watermark_section_title", "技能版本水位"))
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                     HStack(spacing: 6) {
@@ -2056,7 +2045,7 @@ private struct GoalWorkStreamExpandableRow: View {
                     }
                 }
                 .padding(8)
-                .background(theme.neutrals.inner.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .captureDashboardGeometry(id: "goal-role-relay-\(goal.goalID)", role: "roleRelay")
             }
 
@@ -2064,28 +2053,56 @@ private struct GoalWorkStreamExpandableRow: View {
                 HStack(spacing: 6) {
                     ForEach(goal.aiSignals.prefix(2)) { sig in
                         let isZh = locale.language.languageCode?.identifier.hasPrefix("zh") ?? true
-                        let tone: GoalBadgeTone = sig.severity == "positive" ? .success : (sig.severity == "warning" ? .warning : .primary)
+                        let isWarn = sig.severity == "warning"
                         let rawSig = isZh ? sig.labelZh : sig.labelEn
                         let cleanSig = WorkStatusFormatter.sanitizedSummary(rawSig) ?? rawSig
                         HStack(spacing: 4) {
-                            Image(systemName: sig.severity == "positive" ? "checkmark.seal.fill" : "sparkles")
-                                .font(.caption2)
-                                .accessibilityHidden(true)
+                            if isWarn {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .accessibilityHidden(true)
+                            }
                             Text(cleanSig)
                                 .font(.caption2)
                                 .lineLimit(1)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(bgColor(tone), in: Capsule())
-                        .foregroundStyle(fgColor(tone))
+                        .background(isWarn ? theme.warning.opacity(0.15) : theme.neutrals.card, in: Capsule())
+                        .foregroundStyle(isWarn ? theme.warningOnSubtle : theme.text(.body))
                     }
                     Spacer(minLength: 4)
                 }
             }
 
-            ForEach(Array(goal.sessions.prefix(12))) { session in
+            ForEach(visibleSessions) { session in
                 childSessionRow(session)
+            }
+
+            if sortedSessions.count > 3 {
+                Button {
+                    withAnimation(.snappy(duration: 0.16)) {
+                        showAllChildSessions.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(
+                            showAllChildSessions
+                                ? DashboardL10n.tr("dashboard.work_status.collapse_sessions", "收起会话明细")
+                                : DashboardL10n.format("dashboard.work_status.expand_all_sessions_format", "展开全部 %lld 条会话", sortedSessions.count)
+                        )
+                        Image(systemName: showAllChildSessions ? "chevron.up" : "chevron.down")
+                            .accessibilityHidden(true)
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .frame(minHeight: 28)
+                    .background(theme.neutrals.card, in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.leading, 14)
@@ -2132,9 +2149,14 @@ private struct GoalWorkStreamExpandableRow: View {
             en: session.roleLabelEn,
             locale: locale
         )
+        let hasRework = session.actionSplit.spinReworkCalls > 0
         return HStack(alignment: .center, spacing: 8) {
-            capsuleTag(roleBadge, fg: theme.primary.onPrimarySubtle, bg: theme.primary.primary.opacity(0.14))
-                .frame(minWidth: 62, alignment: .leading)
+            capsuleTag(
+            roleBadge,
+            fg: hasRework ? theme.warningOnSubtle : theme.text(.body),
+            bg: hasRework ? theme.warning.opacity(0.14) : theme.neutrals.inner
+            )
+            .frame(minWidth: 62, alignment: .leading)
             Text(session.modelID ?? session.source)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
@@ -2142,6 +2164,7 @@ private struct GoalWorkStreamExpandableRow: View {
                 .lineLimit(1)
             Text(WorkStatusFormatter.durationText(session.durationSec))
                 .font(.caption.monospacedDigit().weight(.medium))
+            .foregroundStyle(theme.neutrals.text1)
                 .frame(width: 48, alignment: .trailing)
                 .layoutPriority(1)
             Text(DashboardL10n.format(
@@ -2181,7 +2204,7 @@ private struct GoalWorkStreamExpandableRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(theme.neutrals.inner.opacity(0.72), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func capsuleTag(_ text: String, fg: Color, bg: Color) -> some View {

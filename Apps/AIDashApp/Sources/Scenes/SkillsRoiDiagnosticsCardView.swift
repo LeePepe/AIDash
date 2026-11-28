@@ -94,45 +94,44 @@
         public let coverage: Double?
     }
 
-    public enum SkillUsageSemanticTier: String, Sendable, Equatable {
+    public enum SkillUsageSemanticTier: String, Sendable, Equatable, CaseIterable {
+        public static var allCasesForAudit: [Self] { allCases }
         case mainstay, stable, needsBoost, idle30d
 
         var label: String {
             switch self {
-            case .mainstay: "🔥 " + skillsText("status_mainstay", "高频主力")
-            case .stable: "🟢 " + skillsText("status_stable", "稳定健康")
-            case .needsBoost: "🟡 " + skillsText("status_needs_boost", "待提效")
-            case .idle30d: "💤 " + skillsText("status_idle_30d", "30天闲置")
+            case .mainstay: skillsText("status_mainstay", "高频主力")
+            case .stable: skillsText("status_stable", "稳定健康")
+            case .needsBoost: skillsText("status_needs_boost", "待提效")
+            case .idle30d: skillsText("status_idle_30d", "30天闲置")
             }
         }
 
         func tint(using theme: Theme) -> Color {
             switch self {
-            case .mainstay: theme.primary.primary
-            case .stable: theme.success
+            case .mainstay, .stable, .idle30d: theme.text(.meta)
             case .needsBoost: theme.warning
-            case .idle30d: theme.text(.meta)
             }
         }
     }
 
-    public enum SkillEvolutionSemanticVerdict: String, Sendable, Equatable {
+    public enum SkillEvolutionSemanticVerdict: String, Sendable, Equatable, CaseIterable {
+        public static var allCasesForAudit: [Self] { allCases }
         case converged, improved, attention, stable
 
         var label: String {
             switch self {
-            case .converged: "🟢 " + skillsText("evo_verdict_converged", "报错收敛")
-            case .improved: "🟢 " + skillsText("evo_verdict_improved", "有效进化")
-            case .attention: "🟠 " + skillsText("evo_verdict_attention", "报错增加")
-            case .stable: "🔵 " + skillsText("evo_verdict_stable", "平稳迭代")
+            case .converged: skillsText("evo_verdict_converged", "报错收敛")
+            case .improved: skillsText("evo_verdict_improved", "有效进化")
+            case .attention: skillsText("evo_verdict_attention", "报错增加")
+            case .stable: skillsText("evo_verdict_stable", "平稳迭代")
             }
         }
 
         func tint(using theme: Theme) -> Color {
             switch self {
-            case .converged, .improved: theme.success
+            case .converged, .improved, .stable: theme.text(.meta)
             case .attention: theme.warning
-            case .stable: theme.classificationTint(.metric)
             }
         }
     }
@@ -233,6 +232,7 @@
         @State private var objectLens: SkillsRoiObjectLens
         @State private var scriptFilter: SkillsRoiScriptFilter = .all
         @State private var qualityView: SkillsRoiQualityView = .coverage
+        @State private var showDocumentsAndQualityDetails = false
         @State private var selectedSkillDetail: SkillInspectorDetail?
         public init(
             summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?,
@@ -272,6 +272,36 @@
             }
         }
 
+        @ViewBuilder private func segmentedPillBar<Option: Identifiable & Equatable>(
+            options: [Option],
+            selection: Binding<Option>,
+            title: @escaping (Option) -> String
+        ) -> some View {
+            HStack(spacing: 3) {
+                ForEach(options) { item in
+                    let isSelected = selection.wrappedValue == item
+                    Button {
+                        selection.wrappedValue = item
+                    } label: {
+                        Text(title(item))
+                            .font(.caption.weight(isSelected ? .semibold : .medium))
+                            .foregroundStyle(isSelected ? theme.neutrals.text1 : theme.neutrals.text2)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .frame(minHeight: 28)
+                            .background(
+                                isSelected ? theme.neutrals.card : Color.clear,
+                                in: Capsule()
+                            )
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(3)
+            .background(theme.neutrals.inner, in: Capsule())
+        }
+
         @ViewBuilder private func fourByFourStage(_ report: SkillsRoiReport) -> some View {
             DashboardResponsiveGrid(wideColumns: 4, compactColumns: 2) {
                 ForEach(SkillsVitalDimension.allCases) { dimension in
@@ -284,18 +314,19 @@
                     .captureDashboardGeometry(id: "skills-vital-\(dimension.id)", role: "vital")
                 }
             }
-            .padding(10)
             .captureDashboardGeometry(id: "skills-p0-vitals", role: "vitals")
 
             HStack(spacing: 8) {
-                Picker(skillsText("object_lens", "对象切面"), selection: $objectLens) {
-                    ForEach(SkillsRoiObjectLens.allCases) { lens in
-                        Text(lens.title).tag(lens)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(minHeight: 28)
+                Text(skillsText("object_lens", "对象切面"))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                segmentedPillBar(
+                    options: Array(SkillsRoiObjectLens.allCases),
+                    selection: $objectLens,
+                    title: \.title
+                )
                 .captureDashboardGeometry(id: "skills-lens", role: "segmented")
+                Spacer(minLength: 4)
 
                 Button { showingMetadata = true } label: {
                     Image(systemName: "info.circle")
@@ -381,11 +412,12 @@
             }
             return VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Circle().fill(tint).frame(width: 7, height: 7)
+                    Circle().fill(vitalDimension == dimension ? theme.primary.primary : theme.neutrals.text3).frame(width: 7, height: 7)
                     Text(dimension.title).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Text(value)
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.neutrals.text1)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Text(subtitle)
@@ -396,8 +428,10 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(tint.opacity(vitalDimension == dimension ? 0.13 : 0.07), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(vitalDimension == dimension ? 0.48 : 0.18), lineWidth: vitalDimension == dimension ? 1.5 : 1))
+            .background(
+                (vitalDimension == dimension ? theme.primary.primary.opacity(0.11) : theme.neutrals.inner),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
         }
 
         @ViewBuilder private func overviewStage(_ report: SkillsRoiReport) -> some View {
@@ -500,13 +534,11 @@
                 ? filteredScripts.sorted { ($0.1.p95Ms ?? 0) > ($1.1.p95Ms ?? 0) }
                 : filteredScripts
             VStack(alignment: .leading, spacing: 8) {
-                Picker(skillsText("script_filter", "脚本筛选"), selection: $scriptFilter) {
-                    ForEach(SkillsRoiScriptFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(minHeight: 28)
+                segmentedPillBar(
+                    options: Array(SkillsRoiScriptFilter.allCases),
+                    selection: $scriptFilter,
+                    title: \.title
+                )
                 DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
                     if scripts.isEmpty {
                         emptyStageCard(report: report, key: "scripts")
@@ -532,19 +564,32 @@
 
         @ViewBuilder private func documentsStage(_ report: SkillsRoiReport) -> some View {
             let details = managedDetails(report).sorted { $0.skillMdLines > $1.skillMdLines }
+            let visibleDetails = showDocumentsAndQualityDetails ? details : Array(details.prefix(4))
             let totalLines = details.reduce(0) { $0 + $1.skillMdLines }
             let totalWords = details.reduce(0) { $0 + $1.bodyTokensEst }
             let totalReferences = details.reduce(0) { $0 + $1.references.count }
             let unhitReferences = details.reduce(0) { $0 + $1.unhitRefsCount }
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(skillsText("document_summary", "说明文档")) \(totalLines) \(skillsText("lines", "行")) / \(totalWords) \(skillsText("words", "词")) · \(skillsText("references_hit", "参考命中")) \(max(0, totalReferences - unhitReferences))/\(totalReferences) · \(skillsText("redundancy", "冗余")) \(unhitReferences)")
-                    .font(.caption)
-                    .foregroundStyle(theme.text(.body))
+                HStack {
+                    Text("\(skillsText("document_summary", "说明文档")) \(totalLines) \(skillsText("lines", "行")) / \(totalWords) \(skillsText("words", "词")) · \(skillsText("references_hit", "参考命中")) \(max(0, totalReferences - unhitReferences))/\(totalReferences) · \(skillsText("redundancy", "冗余")) \(unhitReferences)")
+                        .font(.caption)
+                        .foregroundStyle(theme.text(.body))
+                    Spacer()
+                    if details.count > 4 {
+                        Button(showDocumentsAndQualityDetails ? skillsText("collapse_details", "收起文档与质检明细") : skillsText("expand_doc_quality", "展开文档与质检明细")) {
+                            showDocumentsAndQualityDetails.toggle()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(theme.neutrals.text2)
+                        .frame(minHeight: 28)
+                    }
+                }
                 DashboardResponsiveGrid(wideColumns: 2, compactColumns: 2) {
-                    if details.isEmpty {
+                    if visibleDetails.isEmpty {
                         emptyStageCard(report: report, key: "documents")
                     } else {
-                        ForEach(details) { detail in
+                        ForEach(visibleDetails) { detail in
                             detailCard(title: detail.skill, subtitle: skillsText("document_size", "说明体量")) {
                                 HStack {
                                     compactMetric("\(detail.skillMdLines)", skillsText("lines", "行"))
@@ -560,20 +605,31 @@
         }
 
         @ViewBuilder private func qualityStage(_ report: SkillsRoiReport) -> some View {
-            Picker(skillsText("quality_view", "质检视图"), selection: $qualityView) {
-                ForEach(SkillsRoiQualityView.allCases) { view in
-                    Text(view.title).tag(view)
+            HStack {
+                segmentedPillBar(
+                    options: Array(SkillsRoiQualityView.allCases),
+                    selection: $qualityView,
+                    title: \.title
+                )
+                Spacer()
+                if (report.qualityJudge?.skills.count ?? 0) > 4 {
+                    Button(showDocumentsAndQualityDetails ? skillsText("collapse_details", "收起文档与质检明细") : skillsText("expand_doc_quality", "展开文档与质检明细")) {
+                        showDocumentsAndQualityDetails.toggle()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .frame(minHeight: 28)
                 }
             }
-            .pickerStyle(.segmented)
-            .frame(minHeight: 28)
             switch qualityView {
             case .changes:
                 versionQualityStage(report)
             case .pending:
                 pendingQualityStage(report)
             case .coverage:
-                let rows = report.qualityJudge?.skills ?? []
+                let allRows = report.qualityJudge?.skills ?? []
+                let rows = showDocumentsAndQualityDetails ? allRows : Array(allRows.prefix(4))
                 if rows.isEmpty {
                     emptyStageCard(report: report, key: "quality")
                 } else {
@@ -992,8 +1048,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.22), lineWidth: 1))
+            .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10))
         }
 
         private func passRateSummary(_ report: SkillsRoiReport, managed: [SkillInspectorDetail]) -> String {
@@ -1428,8 +1483,8 @@
                         subtitle: versionStr + " · " + skillsText("cured_section_title", "已自动治愈路障成果"),
                         metricText: skillsText("evo_script_errors", "脚本报错") + " \(item.preFixCount) → \(item.postFixCount) " + skillsText("unit_times", "次"),
                         passRate: pass,
-                        statusLabel: "✅ " + skillsText("flywheel_status_cured", "已清零治愈"),
-                        tint: theme.success
+                        statusLabel: skillsText("flywheel_status_cured", "已清零治愈"),
+                        tint: theme.text(.meta)
                     )
                 )
             }
@@ -1445,7 +1500,7 @@
                         subtitle: prop.displayTitle,
                         metricText: skillsText("calls_7d", "7d") + " \(detail?.loads7d ?? 0) " + skillsText("unit_times", "次"),
                         passRate: pass,
-                        statusLabel: "⏳ " + skillsText("flywheel_status_queued", "慢飞轮排队中"),
+                        statusLabel: skillsText("flywheel_status_queued", "慢飞轮排队中"),
                         tint: theme.warning
                     )
                 )
@@ -1535,8 +1590,7 @@
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.2), lineWidth: 1))
+            .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8))
         }
 
         private func flywheelEntryRow(_ entry: FlywheelDisplayEntry) -> some View {
@@ -2501,10 +2555,10 @@
                 return SkillsPseudoSkillGuard.scrubAcademicCodes(statusLabel)
             }
             switch status {
-            case "improved": return "✅ 有效演进"
-            case "regressed": return "⚠️ 退化告警"
-            case "observing": return "⏳ 样本积累中"
-            default: return "🕰️ 基准版本"
+            case "improved": return "有效演进"
+            case "regressed": return "退化告警"
+            case "observing": return "样本积累中"
+            default: return "基准版本"
             }
         }
 

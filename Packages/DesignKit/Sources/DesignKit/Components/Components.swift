@@ -26,6 +26,8 @@ public struct Card<Content: View>: View {
 }
 
 public struct CardInner<Content: View>: View {
+    public static var hasOuterStrokeBorder: Bool { false }
+
     private let theme = Theme.system
     @ViewBuilder private let content: () -> Content
     public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
@@ -36,10 +38,6 @@ public struct CardInner<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(theme.neutrals.inner)
             .clipShape(RoundedRectangle(cornerRadius: Radius.inner))
-            .overlay(
-                RoundedRectangle(cornerRadius: Radius.inner)
-                    .stroke(theme.neutrals.border, lineWidth: 1)
-            )
     }
 }
 
@@ -59,13 +57,15 @@ public struct Metric: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(value).font(TypeScale.display)
+            Text(value)
+                .font(TypeScale.display)
+                .foregroundStyle(theme.neutrals.text1)
             HStack(spacing: 8) {
                 if let label { Text(label).font(TypeScale.meta).foregroundStyle(theme.neutrals.text2) }
                 if let delta {
                     Text("\(delta.positive ? "▲" : "▼") \(delta.value)")
                         .font(TypeScale.meta.monospacedDigit())
-                        .foregroundStyle(delta.positive ? theme.success : theme.danger)
+                        .foregroundStyle(delta.positive ? theme.neutrals.text2 : theme.danger)
                 }
             }
         }
@@ -252,7 +252,7 @@ public struct RingGauge: View {
 
 // MARK: - StatusPill — colored pill, never grey text
 
-public enum PillTone { case primary, success, warning, danger, neutral }
+public enum PillTone: Sendable, Equatable { case primary, success, warning, danger, neutral }
 
 public struct StatusPill: View {
     private let theme = Theme.system

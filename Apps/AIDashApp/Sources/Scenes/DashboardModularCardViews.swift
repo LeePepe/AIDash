@@ -59,11 +59,12 @@ extension SolidModularCardContainer where HeaderAccessory == EmptyView {
 
 public enum DashboardSemanticColorPalette {
     public static func color(for health: DashboardSemanticHealth) -> Color {
+        let theme = Theme.system
         switch health {
-        case .healthy: return .green
-        case .warning: return .orange
-        case .critical: return .red
-        case .neutral: return .secondary
+        case .healthy: return theme.neutrals.text2
+        case .warning: return theme.warning
+        case .critical: return theme.danger
+        case .neutral: return theme.neutrals.text2
         }
     }
 }
@@ -590,11 +591,10 @@ public struct CLICostQuotaCardView: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.neutrals.inner))
-        .overlay {
+        .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(!entry.authState.isAuthenticated ? tint.opacity(0.45) : (isRecommended ? Color.accentColor.opacity(0.45) : Color.clear), lineWidth: 1.5)
-        }
+                .fill(!entry.authState.isAuthenticated ? tint.opacity(0.10) : (isRecommended ? theme.primary.primary.opacity(0.10) : theme.neutrals.inner))
+        )
         .accessibilityElement(children: .combine)
     }
 
@@ -635,14 +635,14 @@ public struct CLICostQuotaCardView: View {
                         .foregroundStyle(tint)
                         .lineLimit(1)
                     } else if isSelected {
-                        Image(systemName: "line.3.horizontal.decrease.circle.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill").font(.caption2).foregroundStyle(theme.primary.primary)
                     } else if isTopVolume {
-                        Image(systemName: "flame.fill").font(.caption2).foregroundStyle(Color.accentColor)
+                        Image(systemName: "flame.fill").font(.caption2).foregroundStyle(theme.neutrals.text2)
                     }
                 }
                 Text(todayCompact)
                     .font(.system(.title2, design: .monospaced, weight: .bold))
-                    .foregroundStyle(isTopVolume || isSelected ? Color.accentColor : Color.primary).contentTransition(.numericText())
+                    .foregroundStyle(theme.neutrals.text1).contentTransition(.numericText())
                 HStack(spacing: 4) {
                     Text(detailText)
                         .font(.caption2).monospacedDigit()
@@ -657,11 +657,10 @@ public struct CLICostQuotaCardView: View {
                 }
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(theme.neutrals.inner))
-            .overlay {
+            .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
-            }
+                    .fill(isSelected ? theme.primary.primary.opacity(0.12) : theme.neutrals.inner)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

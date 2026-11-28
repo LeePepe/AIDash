@@ -3412,6 +3412,11 @@ struct DashboardWorkspaceTests {
         now = now.addingTimeInterval(6.0)
         store.refreshFromProviderIfStale(minimumInterval: 5.0)
         #expect(provider.captureCalls == 2)
+
+        // Subtractive clarity: DashboardSemanticColorPalette maps healthy/neutral to Theme.system neutral rather than hardcoded .green
+        #expect(DashboardSemanticColorPalette.color(for: .healthy) == Theme.system.neutrals.text2)
+        #expect(DashboardSemanticColorPalette.color(for: .warning) == Theme.system.warning)
+        #expect(DashboardSemanticColorPalette.color(for: .critical) == Theme.system.danger)
     }
 }
 #endif

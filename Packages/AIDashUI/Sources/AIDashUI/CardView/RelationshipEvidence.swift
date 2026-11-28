@@ -29,6 +29,12 @@ struct RelationshipEvidence: Equatable {
     /// (the payload's invariants require non-empty text and a positive count).
     var rows: [String] { [summary, sampleText, windowText, definitionText] }
 
+    /// Secondary methodological metadata revealed on demand behind `口径与样本 ↗`.
+    var methodologyRows: [String] { [sampleText, windowText, definitionText] }
+
+    /// Compact inline token (`n=34 · 7d`) shown inside the disclosure pill.
+    var compactBadgeText: String { "\(sampleText) · \(windowText)" }
+
     // MARK: Localized strings
 
     static func sampleLabel(_ sampleSize: Int) -> String {

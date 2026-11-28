@@ -67,20 +67,25 @@ struct DigestCardViewTests {
         #expect(view.payload.sections == nil)
     }
 
-    @Test("renders populated sections after the body for wide and hero digests")
-    func rendersPopulatedSections() throws {
-        for size in [CardSize.wide, .hero] {
+    @Test("collapses overview prose behind progressive disclosure in small/medium/wide while expanding hero")
+    func progressiveDisclosureForOverviewSizes() throws {
+        for size in [CardSize.small, .medium, .wide] {
             let view = DigestCardView(payload: samplePayload, size: size, style: .neutral)
             _ = view.body
-            #expect(view.payload.sections?.isEmpty == false)
+            #expect(view.showsExpandedContent == false)
+            #expect(view.supportsDisclosure == true)
         }
 
+        let hero = DigestCardView(payload: samplePayload, size: .hero, style: .neutral)
+        _ = hero.body
+        #expect(hero.showsExpandedContent == true)
+        #expect(hero.supportsDisclosure == false)
+
         let source = try Self.digestRendererSource()
+        #expect(source.contains("overviewClampLineLimit = 2"))
+        #expect(source.contains("展开全文 ↗"))
         #expect(source.contains("sectionsContent"))
-        #expect(source.contains("payload.sections"))
-        #expect(source.contains("size == .wide || size == .hero"))
-        #expect(source.contains("ForEach(Array(sections.enumerated())"))
-        #expect(source.contains("bodyText(paragraph)"))
+        #expect(source.contains("showsExpandedContent"))
     }
 
     @Test("renders very long body across hero layout")
@@ -93,15 +98,17 @@ struct DigestCardViewTests {
         let view = DigestCardView(payload: payload, size: .hero, style: .neutral)
         _ = view.body
         #expect(view.payload.body.count > 200)
+        #expect(view.showsExpandedContent == true)
     }
 
-    @Test("renders one section-free body without numeric ellipsis or line truncation")
-    func rendersSectionFreeBody() throws {
+    @Test("short section-free digest omits disclosure button")
+    func shortSectionFreeBodyOmitsDisclosure() throws {
+        let short = DigestPayload(title: "Quiet day", body: "Nothing much shipped.")
+        let view = DigestCardView(payload: short, size: .medium, style: .neutral)
+        #expect(view.supportsDisclosure == false)
         let source = try Self.digestRendererSource()
-        #expect(source.contains("bodyText(payload.body)"))
         #expect(!source.contains("truncatedBody"))
         #expect(!source.contains("\\u{2026}"))
-        #expect(!source.contains("lineLimit"))
     }
 
     // MARK: - Token compliance contract

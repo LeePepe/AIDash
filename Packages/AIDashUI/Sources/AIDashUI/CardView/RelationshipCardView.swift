@@ -28,6 +28,7 @@ public struct RelationshipCardView: View {
     let size: CardSize
     let style: CardStyle
     private let theme = Theme.system
+    @State private var isMethodologyExpanded = false
 
     public init(payload: RelationshipPayload, size: CardSize, style: CardStyle) {
         self.payload = payload
@@ -118,10 +119,9 @@ public struct RelationshipCardView: View {
         }
     }
 
-    /// The four mandatory evidence rows. `summary` leads (it is the card's
-    /// actual claim); the three context rows follow in the monospaced
-    /// secondary recipe so `n=`, the window, and the definition read as
-    /// instrument metadata against the plot.
+    /// Primary conclusion (`summary`) leads upfront as P0; methodological
+    /// evidence rows (`n=`, `timeWindow`, `metricDefinition`) collapse behind
+    /// an interactive `口径与样本 ↗` disclosure toggle to eliminate upfront prose clutter.
     private var evidenceRail: some View {
         let evidence = RelationshipEvidence(payload: payload)
         return VStack(alignment: .leading, spacing: AIDashSpace.s8) {
@@ -129,14 +129,36 @@ public struct RelationshipCardView: View {
                 .font(Self.recipe.secondary)
                 .foregroundStyle(theme.neutrals.text1)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: AIDashSpace.s4) {
-                evidenceRow(evidence.sampleText)
-                evidenceRow(evidence.windowText)
-                evidenceRow(evidence.definitionText)
+            Button {
+                withAnimation(.snappy(duration: 0.16)) {
+                    isMethodologyExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: AIDashSpace.s4) {
+                    Text(isMethodologyExpanded ? "收起口径与样本" : "口径与样本 ↗")
+                    Text("·")
+                    Text(evidence.compactBadgeText)
+                }
+                .font(Self.recipe.secondary)
+                .foregroundStyle(theme.neutrals.text2)
+                .padding(.horizontal, AIDashSpace.s8)
+                .padding(.vertical, AIDashSpace.s4)
+                .statChipSurface()
+                .frame(minHeight: AIDashSpacing.controlHitTarget)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isMethodologyExpanded {
+                VStack(alignment: .leading, spacing: AIDashSpace.s4) {
+                    ForEach(evidence.methodologyRows, id: \.self) { row in
+                        evidenceRow(row)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private func evidenceRow(_ text: String) -> some View {

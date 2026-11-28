@@ -1,4 +1,5 @@
 #if os(macOS)
+import DesignKit
 import SwiftUI
 
 private enum Tab2InstrumentMode: String, CaseIterable {
@@ -87,6 +88,7 @@ private struct PreviewSkillsInventorySection: View {
     @State private var drawerExpanded = false
     @State private var filterMode = 0
     @State private var windowIndex = 2
+    private let theme = Theme.system
 
     private var expanded: Bool { globalExpandAll || drawerExpanded }
     private var totalCalls: Int { max(1, data.skills.map(\.calls30d).reduce(0, +)) }
@@ -96,13 +98,15 @@ private struct PreviewSkillsInventorySection: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: descriptor.symbolName)
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(theme.primary.primary)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(descriptor.title).font(.headline.weight(.semibold))
-                    Text(descriptor.metricTags.joined(separator: "  ·  "))
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let leadTag = descriptor.metricTags.first {
+                        Text(leadTag)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 Button {
@@ -116,7 +120,9 @@ private struct PreviewSkillsInventorySection: View {
             }
             mainInstrument
             ClippedRevealLayout(progress: expanded ? 1 : 0) {
-                PreviewSurface { drawer }
+                drawer
+                    .padding(10)
+                    .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .padding(.top, 8)
             }
             .clipped()
@@ -125,8 +131,7 @@ private struct PreviewSkillsInventorySection: View {
             .animation(speed.spring(), value: expanded)
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.secondary.opacity(0.18)))
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder
@@ -152,29 +157,27 @@ private struct PreviewSkillsInventorySection: View {
         let callSeries: [Double] = [62, 68, 74, 81, 89, 95, 104, 118]
         return VStack(alignment: .leading, spacing: 9) {
             HStack {
-                PreviewPill("Skill 总数 \(data.skills.count) 个（活跃 \(activeCount) / 闲置 \(idleCount)）", tint: .blue)
+                Text("活跃 \(activeCount) / 闲置 \(idleCount)")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button(windows[windowIndex % 3]) { windowIndex = (windowIndex + 1) % 3 }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                statTile("近 30 天总调用", "2,840 次", "▲ +31%", .blue)
-                statTile("内置脚本总调用", "5,420 次", "▲ +45%", .teal)
-                statTile("平均一次成功率", "89.2%", "▲ +7.4%", .green)
-                statTile("平均报错与返工率", "6.8%", "▼ -5.3%", .purple)
+                statTile("一次成功率", "89.2%", "▲ +7.4%", isPrimary: true)
+                statTile("30 天调用", "2,840", "▲ +31%")
+                statTile("脚本调用", "5,420", "▲ +45%")
+                statTile("返工率", "6.8%", "▼ -5.3%")
             }
-            HStack {
-                Text("30 天每日调用热度爬升线").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                Spacer()
-                PreviewPill("▲ 活跃度稳步提升", tint: .green)
-            }
-            PreviewSparkline(values: callSeries, tint: .green, height: 26)
+            Text("30 天调用热度趋势").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            PreviewSparkline(values: callSeries, tint: theme.primary.primary, height: 26)
         }
     }
 
     private var callLeaderboard: some View {
-        let boardTitles = ["🔥 高频主力榜 Top 7", "💤 低频/闲置榜", "📈 增长最快榜"]
+        let boardTitles = ["高频主力榜 Top 7", "低频闲置榜", "增长最快榜"]
         let sorted: [PreviewSkillMetric] = {
             switch filterMode % 3 {
             case 1: return Array(data.skills.sorted { $0.calls30d < $1.calls30d }.prefix(7))
@@ -184,7 +187,9 @@ private struct PreviewSkillsInventorySection: View {
         }()
         return VStack(alignment: .leading, spacing: 7) {
             HStack {
-                PreviewPill(boardTitles[filterMode % 3], tint: .blue)
+                Text(boardTitles[filterMode % 3])
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("切换榜单") { filterMode = (filterMode + 1) % 3 }
                     .buttonStyle(.bordered)
@@ -202,9 +207,9 @@ private struct PreviewSkillsInventorySection: View {
                         label: skill.lastUsedText,
                         value: min(share * 3.8, 1),
                         valueText: "\(skill.calls30d) 次 (\(Int(share * 100))%)",
-                        tint: skill.calls30d == 0 ? .orange : .blue
+                        tint: skill.calls30d == 0 ? theme.warning : theme.primary.primary
                     )
-                    PreviewSparkline(values: skill.trend14d, tint: skill.calls30d == 0 ? .orange : .green, height: 20)
+                    PreviewSparkline(values: skill.trend14d, tint: skill.calls30d == 0 ? theme.warning : theme.primary.primary.opacity(0.75), height: 20)
                         .frame(width: 54)
                 }
             }
@@ -213,14 +218,16 @@ private struct PreviewSkillsInventorySection: View {
 
     private var categoryDaily: some View {
         let categories: [CategoryDailyRow] = [
-            CategoryDailyRow(id: "总控与编排", calls: 1_130, deltaText: "▲ +28%", tint: .blue),
-            CategoryDailyRow(id: "工程与构建", calls: 749, deltaText: "▲ +24%", tint: .teal),
-            CategoryDailyRow(id: "界面与设计", calls: 576, deltaText: "▲ +39%", tint: .purple),
-            CategoryDailyRow(id: "数据与复盘", calls: 385, deltaText: "▲ +33%", tint: .green)
+            CategoryDailyRow(id: "总控与编排", calls: 1_130, deltaText: "▲ +28%", tint: theme.primary.primary),
+            CategoryDailyRow(id: "工程与构建", calls: 749, deltaText: "▲ +24%", tint: theme.primary.primary.opacity(0.76)),
+            CategoryDailyRow(id: "界面与设计", calls: 576, deltaText: "▲ +39%", tint: theme.primary.primary.opacity(0.54)),
+            CategoryDailyRow(id: "数据与复盘", calls: 385, deltaText: "▲ +33%", tint: theme.primary.primary.opacity(0.36))
         ]
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                PreviewPill("近 30 天合计 2,840 次调用 ▲ +31%", tint: .green)
+                Text("30 天合计 2,840 次调用")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button(filterMode == 0 ? "看全部类别" : categories[(filterMode - 1) % categories.count].id) {
                     filterMode = (filterMode + 1) % (categories.count + 1)
@@ -239,10 +246,10 @@ private struct PreviewSkillsInventorySection: View {
             HStack(alignment: .bottom, spacing: 6) {
                 ForEach(0..<10, id: \.self) { day in
                     VStack(spacing: 2) {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.green.opacity(0.8)).frame(height: CGFloat(6 + day))
-                        RoundedRectangle(cornerRadius: 2).fill(Color.purple.opacity(0.8)).frame(height: CGFloat(8 + (day % 4) * 2))
-                        RoundedRectangle(cornerRadius: 2).fill(Color.teal.opacity(0.8)).frame(height: CGFloat(10 + day))
-                        RoundedRectangle(cornerRadius: 2).fill(Color.blue.opacity(0.85)).frame(height: CGFloat(14 + day * 2))
+                        RoundedRectangle(cornerRadius: 2).fill(theme.primary.primary.opacity(0.32)).frame(height: CGFloat(6 + day))
+                        RoundedRectangle(cornerRadius: 2).fill(theme.primary.primary.opacity(0.52)).frame(height: CGFloat(8 + (day % 4) * 2))
+                        RoundedRectangle(cornerRadius: 2).fill(theme.primary.primary.opacity(0.74)).frame(height: CGFloat(10 + day))
+                        RoundedRectangle(cornerRadius: 2).fill(theme.primary.primary).frame(height: CGFloat(14 + day * 2))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -329,28 +336,29 @@ private struct PreviewSkillsInventorySection: View {
     private var autoOptReport: some View {
         let upgraded = data.skills.filter { $0.beforeOptSuccessRate != nil }
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                PreviewPill("单技能 vN-1 → vN 自动复盘已升级 \(upgraded.count) 个主力 Skill ▲", tint: .green)
-                Spacer()
-                PreviewPill("L0–L3 四层脉冲正常", tint: .blue)
-            }
+            Text("自动复盘升级 \(upgraded.count) 个主力 Skill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
             ForEach(upgraded) { skill in
                 let before = Int((skill.beforeOptSuccessRate ?? 0.72) * 100)
                 let after = Int((skill.afterOptSuccessRate ?? skill.firstPassRate) * 100)
-                let minBefore = skill.beforeOptMinutes ?? 8.5
-                let minAfter = skill.afterOptMinutes ?? 4.8
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(skill.name).font(.caption.weight(.semibold))
-                        Text("vN-1 → vN · ✅ 有效演进")
+                        Text("vN-1 → vN")
                             .font(.caption2.monospaced())
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("exit=2 路障率 ▼ · 一次通过 \(before)% → \(after)% ▲ · 耗时 \(String(format: "%.1f", minBefore))m → \(String(format: "%.1f", minAfter))m ▼")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.green)
+                        Text("\(after)% ▲ +\(after - before)%")
+                            .font(.caption2.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(theme.neutrals.text1)
                     }
-                    PreviewMetricBar(label: skill.optSummary ?? "自动优化完成", value: Double(after) / 100.0, valueText: "提升 +\(after - before)%", tint: .green)
+                    PreviewMetricBar(
+                        label: skill.optSummary ?? "自动优化完成",
+                        value: Double(after) / 100.0,
+                        valueText: "+\(after - before)%",
+                        tint: theme.primary.primary
+                    )
                 }
             }
         }
@@ -361,32 +369,33 @@ private struct PreviewSkillsInventorySection: View {
         let watchers = Array(data.skills.filter { $0.weeklyDeltaPct < 0 }.prefix(3))
         return HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
-                PreviewPill("本周进步最快 Top 4 ▲", tint: .green)
+                Text("本周进步 Top 4")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
                 ForEach(gainers) { skill in
                     HStack {
                         Text(skill.name).font(.caption.weight(.medium)).lineLimit(1)
                         Spacer()
-                        Text(skill.deltaText).font(.caption2.monospacedDigit()).foregroundStyle(.green)
+                        Text(skill.deltaText).font(.caption2.monospacedDigit()).foregroundStyle(theme.neutrals.text2)
                     }
                     .padding(6)
-                    .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 6) {
-                PreviewPill("本周有波动需关注 ▼", tint: .orange)
+                Text("本周波动关注")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.warningOnSubtle)
                 ForEach(watchers) { skill in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(skill.name).font(.caption.weight(.medium)).lineLimit(1)
-                            Spacer()
-                            Text(skill.deltaText).font(.caption2.monospacedDigit()).foregroundStyle(.orange)
-                        }
-                        Text("后台已排期自动优化").font(.caption2).foregroundStyle(.secondary)
+                    HStack {
+                        Text(skill.name).font(.caption.weight(.medium)).lineLimit(1)
+                        Spacer()
+                        Text(skill.deltaText).font(.caption2.monospacedDigit()).foregroundStyle(theme.warningOnSubtle)
                     }
                     .padding(6)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .background(theme.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -396,19 +405,11 @@ private struct PreviewSkillsInventorySection: View {
     private var docUsage: some View {
         let savedSeries: [Double] = [12, 18, 25, 31, 38, 44, 49, 54]
         return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                PreviewPill("共 81 篇参考文档 · 自动精简后每次省 54% Token ▼", tint: .green)
-                Spacer()
-            }
-            PreviewMetricBar(label: "经常用到（高频主力文档）", value: 48.0 / 81.0, valueText: "48 篇 (59%)", tint: .green)
-            PreviewMetricBar(label: "修问题时救急用到（低频刚需）", value: 24.0 / 81.0, valueText: "24 篇 (30%)", tint: .blue)
-            PreviewMetricBar(label: "长期 0 次阅读（后台自动精简对象）", value: 9.0 / 81.0, valueText: "9 篇 (11%) ▼", tint: .orange)
-            HStack {
-                Text("单次加载节省 Token 比例爬升趋势").font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                Text("▲ 省下 54%").font(.caption2.monospacedDigit()).foregroundStyle(.green)
-            }
-            PreviewSparkline(values: savedSeries, tint: .green, height: 22)
+            PreviewMetricBar(label: "常用高频文档", value: 48.0 / 81.0, valueText: "48 篇 (59%)", tint: theme.primary.primary)
+            PreviewMetricBar(label: "排障刚需文档", value: 24.0 / 81.0, valueText: "24 篇 (30%)", tint: theme.primary.primary.opacity(0.65))
+            PreviewMetricBar(label: "长期 0 次阅读", value: 9.0 / 81.0, valueText: "9 篇 (11%) ▼", tint: theme.warning)
+            Text("单次加载节省 Token 趋势").font(.caption2).foregroundStyle(.secondary)
+            PreviewSparkline(values: savedSeries, tint: theme.primary.primary, height: 22)
         }
     }
 
@@ -442,33 +443,39 @@ private struct PreviewSkillsInventorySection: View {
             HStack {
                 Text(skill.name).font(.caption.weight(.semibold)).lineLimit(1)
                 Spacer()
-                Text("\(Int(skill.firstPassRate * 100))%").font(.caption2.weight(.bold).monospacedDigit()).foregroundStyle(.green)
+                Text("\(Int(skill.firstPassRate * 100))%")
+                    .font(.caption2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(theme.neutrals.text1)
             }
             Text(skill.plainSummary).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             HStack(spacing: 6) {
                 Text("\(skill.calls30d) 次").font(.caption2.monospacedDigit())
-                Text(skill.deltaText).font(.caption2.monospacedDigit()).foregroundStyle(skill.weeklyDeltaPct >= 0 ? .green : .orange)
+                Text(skill.deltaText)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(skill.weeklyDeltaPct >= 0 ? Color.secondary : theme.warningOnSubtle)
                 Spacer()
-                PreviewSparkline(values: skill.trend14d, tint: skill.calls30d == 0 ? .orange : .green, height: 14)
+                PreviewSparkline(values: skill.trend14d, tint: skill.calls30d == 0 ? theme.warning : theme.primary.primary, height: 14)
                     .frame(width: 46)
             }
         }
         .padding(8)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func statTile(_ label: String, _ value: String, _ delta: String, _ tint: Color) -> some View {
+    private func statTile(_ label: String, _ value: String, _ delta: String, isPrimary: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label).font(.caption2).foregroundStyle(.secondary)
                 Spacer()
-                Text(delta).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(.green)
+                Text(delta).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(.secondary)
             }
-            Text(value).font(.subheadline.weight(.bold).monospacedDigit()).foregroundStyle(tint)
+            Text(value)
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .foregroundStyle(isPrimary ? theme.neutrals.text1 : theme.neutrals.text2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .padding(8)
-        .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(isPrimary ? theme.primary.primary.opacity(0.09) : theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     @ViewBuilder
@@ -477,7 +484,9 @@ private struct PreviewSkillsInventorySection: View {
             HStack {
                 Text(drawerTitle).font(.subheadline.weight(.semibold))
                 Spacer()
-                PreviewPill("共 \(data.skills.count) 个受管 Skill", tint: .blue)
+                Text("\(data.skills.count) 个 Skill")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
             if mode == .fullMatrix {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {

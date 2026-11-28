@@ -333,21 +333,21 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
 
     private func sectionJumpRailContent(containers: [ContainerModel], proxy: ScrollViewProxy?) -> some View {
         HStack(spacing: AIDashSpace.s8) {
-            Button {
+            containerChip(
+                title: String(localized: "briefing.section_jump.all", defaultValue: "All", bundle: .module),
+                ordinal: nil,
+                isSelected: selectedContainerID == nil
+            ) {
                 selectedContainerID = nil
-            } label: {
-                Text(String(localized: "briefing.section_jump.all", defaultValue: "All", bundle: .module))
-                    .font(AIDashTypography.mastheadStatus)
-                    .foregroundStyle(theme.neutrals.text1)
-                    .padding(.horizontal, AIDashSpace.s8)
-                    .frame(minHeight: AIDashSpacing.controlHitTarget)
-                    .background(theme.neutrals.inner, in: Capsule())
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             ForEach(containers.sorted { $0.order < $1.order }) { container in
-                Button {
-                    if selectedContainerID == container.id {
+                let isSelected = selectedContainerID == container.id
+                containerChip(
+                    title: container.title,
+                    ordinal: container.order + 1,
+                    isSelected: isSelected
+                ) {
+                    if isSelected {
                         selectedContainerID = nil
                     } else {
                         selectedContainerID = container.id
@@ -357,24 +357,7 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
                             proxy.scrollTo(container.id, anchor: .top)
                         }
                     }
-                } label: {
-                    HStack(spacing: AIDashSpace.s4) {
-                        Text(String(format: "%02d", container.order + 1))
-                            .font(AIDashTypography.mastheadStatus)
-                            .foregroundStyle(theme.neutrals.text3)
-                            .monospacedDigit()
-                        Text(container.title)
-                            .font(AIDashTypography.mastheadStatus)
-                            .foregroundStyle(theme.neutrals.text1)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                    }
-                    .padding(.horizontal, AIDashSpace.s8)
-                    .frame(minHeight: AIDashSpacing.controlHitTarget)
-                    .background(theme.neutrals.inner, in: Capsule())
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel(
                     Text(
                         String(
@@ -387,6 +370,37 @@ public struct BriefingView: View { // swiftlint:disable:this type_body_length
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    private func containerChip(
+        title: String,
+        ordinal: Int?,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: AIDashSpace.s4) {
+                if let ordinal {
+                    Text(String(format: "%02d", ordinal))
+                        .font(AIDashTypography.mastheadStatus)
+                        .foregroundStyle(isSelected ? theme.primary.onPrimarySubtle : theme.neutrals.text3)
+                        .monospacedDigit()
+                }
+                Text(title)
+                    .font(AIDashTypography.mastheadStatus)
+                    .foregroundStyle(isSelected ? theme.primary.onPrimarySubtle : theme.neutrals.text2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .padding(.horizontal, AIDashSpace.s8)
+            .frame(minHeight: AIDashSpacing.controlHitTarget)
+            .background(
+                isSelected ? theme.primary.primary.opacity(0.14) : Color.clear,
+                in: Capsule()
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
     private func filteredContainers(_ containers: [ContainerModel]) -> [ContainerModel] {
         guard let selectedContainerID else { return containers }

@@ -1,4 +1,5 @@
 #if os(macOS)
+import DesignKit
 import SwiftUI
 
 private enum Tab1InstrumentMode: String, CaseIterable {
@@ -74,6 +75,7 @@ private struct PreviewAgentOverviewSection: View {
     @State private var selectedIndex = 0
     @State private var windowIndex = 2
     @State private var alternateMode = false
+    private let theme = Theme.system
 
     private var expanded: Bool { globalExpandAll || drawerExpanded }
 
@@ -82,13 +84,15 @@ private struct PreviewAgentOverviewSection: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: descriptor.symbolName)
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(theme.primary.primary)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(descriptor.title).font(.headline.weight(.semibold))
-                    Text(descriptor.metricTags.joined(separator: "  ·  "))
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    if let leadTag = descriptor.metricTags.first {
+                        Text(leadTag)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 Button {
@@ -110,8 +114,7 @@ private struct PreviewAgentOverviewSection: View {
             .animation(speed.spring(), value: expanded)
         }
         .padding(14)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.secondary.opacity(0.18)))
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder
@@ -132,28 +135,26 @@ private struct PreviewAgentOverviewSection: View {
 
     private var baseOverviewInstrument: some View {
         let windows = ["近 7 天", "近 14 天", "近 30 天"]
-        let goalText = ["12 个 Goal / 36 子任务", "24 个 Goal / 74 子任务", "42 个 Goal / 128 子任务"][windowIndex % 3]
+        let goalText = ["12 Goals", "24 Goals", "42 Goals"][windowIndex % 3]
         let successSeries: [Double] = [79.5, 81.2, 82.8, 84.1, 85.6, 86.9, 87.8, 88.4]
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                PreviewPill("基本盘总览 · \(windows[windowIndex % 3])", tint: .blue)
+                Text(windows[windowIndex % 3])
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button("切换 7D / 14D / 30D") { windowIndex = (windowIndex + 1) % 3 }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                kpiTile("完成任务总数", goalText, "▲ +18%", .blue)
-                kpiTile("一次成功率", "88.4%", "▲ +6.2%", .green)
-                kpiTile("单任务平均耗时", "6.4 分钟", "▼ -28%", .teal)
-                kpiTile("单任务均摊消耗", "142K Token", "▼ -22%", .purple)
+                kpiTile("一次成功率", "88.4%", "▲ +6.2%", isPrimary: true)
+                kpiTile("完成规模", goalText, "▲ +18%")
+                kpiTile("单任务耗时", "6.4m", "▼ -28%")
+                kpiTile("均摊消耗", "142K", "▼ -22%")
             }
-            HStack(spacing: 10) {
-                Text("30 天一次成功率爬升曲线").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                Spacer()
-                PreviewPill("79.5% → 88.4% ▲", tint: .green)
-            }
-            PreviewSparkline(values: successSeries, tint: .green, height: 28)
+            Text("30 天一次成功率爬升曲线").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            PreviewSparkline(values: successSeries, tint: theme.primary.primary, height: 28)
         }
     }
 
@@ -272,8 +273,6 @@ private struct PreviewAgentOverviewSection: View {
         let gateCurve: [Double] = [95, 78, 62, 44, 29, 21, 16, 14]
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                PreviewPill("单任务 11.2m → 6.4m ▼ -43%", tint: .green)
-                PreviewPill("本地门禁 95s → 14s ▼ -85%", tint: .teal)
                 Spacer()
                 Button(alternateMode ? "看门禁耗时" : "看任务总耗时") { alternateMode.toggle() }
                     .buttonStyle(.bordered)
@@ -281,19 +280,19 @@ private struct PreviewAgentOverviewSection: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("单个任务平均完成耗时（分钟）").font(.caption.weight(.semibold))
+                    Text("单任务中位耗时").font(.caption.weight(.semibold))
                     Spacer()
-                    Text("6.4m ▼ 持续变快").font(.caption2.monospacedDigit()).foregroundStyle(.green)
+                    Text("6.4m ▼ -43%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                PreviewSparkline(values: taskCurve, tint: .blue, height: 32)
+                PreviewSparkline(values: taskCurve, tint: theme.primary.primary, height: 32)
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("本地测试检查平均耗时（秒）").font(.caption.weight(.semibold))
+                    Text("本地门禁中位耗时").font(.caption.weight(.semibold))
                     Spacer()
-                    Text("14s ▼ 迁入 /tmp 提速").font(.caption2.monospacedDigit()).foregroundStyle(.teal)
+                    Text("14s ▼ -85%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                PreviewSparkline(values: gateCurve, tint: .teal, height: 32)
+                PreviewSparkline(values: gateCurve, tint: theme.primary.primary.opacity(0.65), height: 32)
             }
         }
     }
@@ -339,31 +338,25 @@ private struct PreviewAgentOverviewSection: View {
                 ForEach(Array(data.roles.enumerated()), id: \.element.id) { index, role in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("\(role.plainRoleTitle) (\(role.name))").font(.caption.weight(.semibold)).lineLimit(1)
+                            Text(role.plainRoleTitle).font(.caption.weight(.semibold)).lineLimit(1)
                             Spacer()
-                            Text(role.durationDeltaText).font(.caption2.monospacedDigit()).foregroundStyle(.green)
+                            Text(role.durationDeltaText).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                         }
-                        Text("完成 \(role.completedCount) 次 · 一次成功 \(Int(role.firstPassRate * 100))%")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Text("平均耗时 \(String(format: "%.1f", role.avgMinutes)) 分钟")
-                            .font(.caption2.monospacedDigit())
+                        Text("\(String(format: "%.1f", role.avgMinutes))m")
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .foregroundStyle(theme.neutrals.text1)
                     }
                     .padding(8)
                     .background(
-                        index == selectedIndex ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.07),
+                        index == selectedIndex ? theme.primary.primary.opacity(0.13) : theme.neutrals.inner,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                     )
                     .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .onTapGesture { selectedIndex = index }
                 }
             }
-            HStack {
-                Text("\(activeRole.plainRoleTitle) 平均耗时下降曲线").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                Spacer()
-                PreviewPill("\(activeRole.durationDeltaText) 提速", tint: .green)
-            }
-            PreviewSparkline(values: activeRole.durationTrend, tint: .blue, height: 24)
+            Text("\(activeRole.plainRoleTitle) 耗时曲线").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            PreviewSparkline(values: activeRole.durationTrend, tint: theme.primary.primary, height: 24)
             AgentRetroTrajectoryPanelsView(retro: Self.sampleAgentRetro)
         }
     }
@@ -453,26 +446,22 @@ private struct PreviewAgentOverviewSection: View {
 
     private var repoTrendsInstrument: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                PreviewPill("4 大主力仓库 30 天共完成 128 个任务 ▲", tint: .blue)
-                Spacer()
-            }
             ForEach(Array(data.repos.enumerated()), id: \.element.id) { index, repo in
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(repo.repoName).font(.caption.weight(.semibold))
-                        Text("30天 \(repo.completedTasks30d) 任务 · 调用 \(repo.totalCalls30d) 次")
+                        Text("\(repo.completedTasks30d) 任务")
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    .frame(width: 160, alignment: .leading)
+                    .frame(width: 140, alignment: .leading)
                     PreviewMetricBar(
                         label: "一次成功率",
                         value: repo.firstPassRate,
                         valueText: "\(Int(repo.firstPassRate * 100))% \(repo.deltaText)",
-                        tint: .green
+                        tint: theme.primary.primary
                     )
-                    PreviewSparkline(values: repo.activityTrend14d, tint: .blue, height: 22)
+                    PreviewSparkline(values: repo.activityTrend14d, tint: theme.primary.primary.opacity(0.75), height: 22)
                         .frame(width: 64)
                 }
                 .padding(.vertical, 2)
@@ -482,38 +471,37 @@ private struct PreviewAgentOverviewSection: View {
         }
     }
 
-    private func kpiTile(_ label: String, _ value: String, _ delta: String, _ tint: Color) -> some View {
+    private func kpiTile(_ label: String, _ value: String, _ delta: String, isPrimary: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label).font(.caption2).foregroundStyle(.secondary)
                 Spacer()
-                Text(delta).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(.green)
+                Text(delta).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(.secondary)
             }
-            Text(value).font(.subheadline.weight(.bold).monospacedDigit()).foregroundStyle(tint).lineLimit(1)
+            Text(value)
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .foregroundStyle(isPrimary ? theme.neutrals.text1 : theme.neutrals.text2)
+                .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .padding(8)
-        .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(isPrimary ? theme.primary.primary.opacity(0.09) : theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var drawer: some View {
-        PreviewSurface {
-            VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(drawerTitle).font(.subheadline.weight(.semibold))
+            ForEach(Array(drawerRows.enumerated()), id: \.offset) { _, row in
                 HStack {
-                    Text(drawerTitle).font(.subheadline.weight(.semibold))
+                    Text(row.0).font(.caption)
                     Spacer()
-                    PreviewPill("随时间演进明细", tint: .secondary)
+                    Text(row.1).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                ForEach(Array(drawerRows.enumerated()), id: \.offset) { _, row in
-                    HStack {
-                        Text(row.0).font(.caption)
-                        Spacer()
-                        Text(row.1).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                    Divider()
-                }
+                Divider()
             }
         }
+        .padding(10)
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private var drawerTitle: String {
