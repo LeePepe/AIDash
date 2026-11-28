@@ -147,15 +147,71 @@ private struct PreviewAgentOverviewSection: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                kpiTile("一次成功率", "88.4%", "▲ +6.2%", isPrimary: true)
-                kpiTile("完成规模", goalText, "▲ +18%")
-                kpiTile("单任务耗时", "6.4m", "▼ -28%")
-                kpiTile("均摊消耗", "142K", "▼ -22%")
+            GeometryReader { proxy in
+                HStack(alignment: .center, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("一次成功率")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("88.4%")
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(theme.neutrals.text1)
+                            Text("▲ +6.2%")
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(theme.neutrals.text2)
+                        }
+                        PreviewSparkline(values: successSeries, tint: theme.primary.primary, height: 56)
+                    }
+                    .frame(width: max(0, proxy.size.width * 0.58 - 10), alignment: .leading)
+
+                    Rectangle()
+                        .fill(theme.neutrals.border.opacity(0.45))
+                        .frame(width: 1)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        overviewMetricRow("完成规模", goalText, "▲ +18%")
+                        Divider().overlay(theme.neutrals.border.opacity(0.35))
+                        overviewMetricRow("单任务耗时", "6.4m", "▼ -28%")
+                        Divider().overlay(theme.neutrals.border.opacity(0.35))
+                        overviewMetricRow("均摊消耗", "142K", "▼ -22%")
+                    }
+                    .frame(width: max(0, proxy.size.width * 0.42 - 10), alignment: .leading)
+                }
             }
-            Text("30 天一次成功率爬升曲线").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            PreviewSparkline(values: successSeries, tint: theme.primary.primary, height: 28)
+            .frame(height: 126)
+            Button {
+                withAnimation(speed.spring()) { drawerExpanded.toggle() }
+            } label: {
+                Label(
+                    DashboardL10n.tr("dashboard.preview.tab1.expand_weekly", "展开周度对比明细"),
+                    systemImage: expanded ? "chevron.up" : "chevron.down"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
+    }
+
+    private func overviewMetricRow(_ label: String, _ value: String, _ delta: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(theme.neutrals.text1)
+            Text(delta)
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(theme.neutrals.text2)
+                .lineLimit(1)
+        }
+        .frame(minHeight: 40)
     }
 
     private var dailyReworkInstrument: some View {
@@ -267,7 +323,6 @@ private struct PreviewAgentOverviewSection: View {
             }
         }
     }
-
     private var durationDropInstrument: some View {
         let taskCurve: [Double] = [11.2, 10.4, 9.6, 8.7, 7.9, 7.2, 6.8, 6.4]
         let gateCurve: [Double] = [95, 78, 62, 44, 29, 21, 16, 14]
@@ -296,7 +351,6 @@ private struct PreviewAgentOverviewSection: View {
             }
         }
     }
-
     private var modelCompareInstrument: some View {
         let sorted = alternateMode
             ? data.models.sorted { $0.speedTokensPerSec > $1.speedTokensPerSec }
@@ -469,23 +523,6 @@ private struct PreviewAgentOverviewSection: View {
                 .onTapGesture { selectedIndex = index }
             }
         }
-    }
-
-    private func kpiTile(_ label: String, _ value: String, _ delta: String, isPrimary: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label).font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                Text(delta).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(.secondary)
-            }
-            Text(value)
-                .font(.subheadline.weight(.bold).monospacedDigit())
-                .foregroundStyle(isPrimary ? theme.neutrals.text1 : theme.neutrals.text2)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(8)
-        .background(isPrimary ? theme.primary.primary.opacity(0.09) : theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var drawer: some View {

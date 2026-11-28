@@ -306,7 +306,7 @@ private struct PreviewGoalWorkStreamVariantCard: View {
         case .dualTrackFocusRepoAccordion:
             GoalWorkStreamWorkbenchView(
                 summary: summary,
-                initialExpandedGoalIDs: expanded ? ["goal-workbench-v2", "goal-skill-gate-collision"] : ["goal-workbench-v2"],
+                initialExpandedGoalIDs: expanded ? ["goal-workbench-v2", "goal-skill-gate-collision"] : [],
                 initialExpandedRepos: expanded ? ["AIDash"] : [],
                 headerVariant: .dualTrackDeck,
                 hierarchyVariant: .focusTopWithRepoAccordion,

@@ -1,26 +1,22 @@
 #if os(macOS)
 import DesignKit
 import SwiftUI
-
 private enum Tab2InstrumentMode: String, CaseIterable {
     case inventoryOverview, callLeaderboard, categoryDaily, successEvolution, scriptErrorDrop
     case scriptSpeedTrend, autoOptReport, weeklyMovers, docUsage, fullMatrix
 }
-
 private struct CategoryDailyRow: Identifiable {
     let id: String
     let calls: Int
     let deltaText: String
     let tint: Color
 }
-
 private struct ScriptSpeedRow: Identifiable {
     let id: String
     let avgSeconds: Double
     let valueText: String
     let tint: Color
 }
-
 @MainActor
 public enum Tab2SkillsArsenalInspectorSections {
     public static let descriptors: [PreviewVariantDescriptor] = [
@@ -35,7 +31,6 @@ public enum Tab2SkillsArsenalInspectorSections {
         PreviewVariantDescriptor(id: "tab2-v09", tab: .agentEfficiency, badgeCode: "V09", title: "Skill 内部参考文档实际使用率（常用 vs 救急用 vs 从未用过）", metricTags: ["常用 48 篇 · 救急 24 篇", "0 次阅读 9 篇", "自动精简省 Token ▼"], symbolName: "book.pages", topologySignature: "tab2-v09:3tier-doc-usage-bars+token-saved-sparkline+skill-doc-drawer"),
         PreviewVariantDescriptor(id: "tab2-v10", tab: .agentEfficiency, badgeCode: "V10", title: "全部 24 个 Skill 全景小卡片矩阵（调用次数 + 成功率 + 趋势线）", metricTags: ["默认 Top 8 主力卡", "展开看齐 24 个 Skill", "14 天微折线 ▲"], symbolName: "square.grid.3x3.topleft.filled", topologySignature: "tab2-v10:compact-top8-bento-cards+14d-sparklines+all24-matrix-drawer")
     ]
-
     @ViewBuilder
     public static func view(
         for descriptor: PreviewVariantDescriptor,
@@ -165,15 +160,71 @@ private struct PreviewSkillsInventorySection: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                statTile("一次成功率", "89.2%", "▲ +7.4%", isPrimary: true)
-                statTile("30 天调用", "2,840", "▲ +31%")
-                statTile("脚本调用", "5,420", "▲ +45%")
-                statTile("返工率", "6.8%", "▼ -5.3%")
+            GeometryReader { proxy in
+                HStack(alignment: .center, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("一次成功率")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("89.2%")
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(theme.neutrals.text1)
+                            Text("▲ +7.4%")
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(theme.neutrals.text2)
+                        }
+                        PreviewSparkline(values: callSeries, tint: theme.primary.primary, height: 56)
+                    }
+                    .frame(width: max(0, proxy.size.width * 0.58 - 10), alignment: .leading)
+
+                    Rectangle()
+                        .fill(theme.neutrals.border.opacity(0.45))
+                        .frame(width: 1)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        inventoryMetricRow("30 天调用", "2,840", "▲ +31%")
+                        Divider().overlay(theme.neutrals.border.opacity(0.35))
+                        inventoryMetricRow("脚本调用", "5,420", "▲ +45%")
+                        Divider().overlay(theme.neutrals.border.opacity(0.35))
+                        inventoryMetricRow("返工率", "6.8%", "▼ -5.3%")
+                    }
+                    .frame(width: max(0, proxy.size.width * 0.42 - 10), alignment: .leading)
+                }
             }
-            Text("30 天调用热度趋势").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            PreviewSparkline(values: callSeries, tint: theme.primary.primary, height: 26)
+            .frame(height: 126)
+            Button {
+                withAnimation(speed.spring()) { drawerExpanded.toggle() }
+            } label: {
+                Label(
+                    DashboardL10n.tr("dashboard.preview.tab2.expand_inventory", "展开闲置与主力清单"),
+                    systemImage: expanded ? "chevron.up" : "chevron.down"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
+    }
+
+    private func inventoryMetricRow(_ label: String, _ value: String, _ delta: String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(value)
+                .font(.system(size: 16, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(theme.neutrals.text1)
+            Text(delta)
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(theme.neutrals.text2)
+                .lineLimit(1)
+        }
+        .frame(minHeight: 40)
     }
 
     private var callLeaderboard: some View {
@@ -257,7 +308,6 @@ private struct PreviewSkillsInventorySection: View {
             .frame(height: 58)
         }
     }
-
     private var successEvolution: some View {
         let top6 = Array(data.skills.prefix(6))
         return VStack(alignment: .leading, spacing: 7) {
@@ -282,7 +332,6 @@ private struct PreviewSkillsInventorySection: View {
             }
         }
     }
-
     private var scriptErrorDrop: some View {
         let errSeries: [Double] = [8.4, 6.9, 5.5, 4.1, 2.9, 2.1, 1.5, 1.1]
         let scripts: [(String, Int, String)] = [
@@ -310,7 +359,6 @@ private struct PreviewSkillsInventorySection: View {
             }
         }
     }
-
     private var scriptSpeedTrend: some View {
         let speedCurve: [Double] = [4.8, 4.1, 3.5, 2.9, 2.4, 2.0, 1.7, 1.5]
         let rows: [ScriptSpeedRow] = [
@@ -332,7 +380,6 @@ private struct PreviewSkillsInventorySection: View {
             }
         }
     }
-
     private var autoOptReport: some View {
         let upgraded = data.skills.filter { $0.beforeOptSuccessRate != nil }
         return VStack(alignment: .leading, spacing: 8) {
@@ -363,7 +410,6 @@ private struct PreviewSkillsInventorySection: View {
             }
         }
     }
-
     private var weeklyMovers: some View {
         let gainers = Array(data.skills.sorted { $0.weeklyDeltaPct > $1.weeklyDeltaPct }.prefix(4))
         let watchers = Array(data.skills.filter { $0.weeklyDeltaPct < 0 }.prefix(3))
@@ -383,7 +429,6 @@ private struct PreviewSkillsInventorySection: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
             VStack(alignment: .leading, spacing: 6) {
                 Text("本周波动关注")
                     .font(.caption.weight(.semibold))
@@ -401,7 +446,6 @@ private struct PreviewSkillsInventorySection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
-
     private var docUsage: some View {
         let savedSeries: [Double] = [12, 18, 25, 31, 38, 44, 49, 54]
         return VStack(alignment: .leading, spacing: 8) {
@@ -412,7 +456,6 @@ private struct PreviewSkillsInventorySection: View {
             PreviewSparkline(values: savedSeries, tint: theme.primary.primary, height: 22)
         }
     }
-
     private var fullMatrix: some View {
         let sorted: [PreviewSkillMetric] = {
             switch filterMode % 3 {
@@ -437,7 +480,6 @@ private struct PreviewSkillsInventorySection: View {
             }
         }
     }
-
     private func skillMiniCard(_ skill: PreviewSkillMetric) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -461,23 +503,6 @@ private struct PreviewSkillsInventorySection: View {
         .padding(8)
         .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
-
-    private func statTile(_ label: String, _ value: String, _ delta: String, isPrimary: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label).font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                Text(delta).font(.caption2.weight(.semibold).monospacedDigit()).foregroundStyle(.secondary)
-            }
-            Text(value)
-                .font(.subheadline.weight(.bold).monospacedDigit())
-                .foregroundStyle(isPrimary ? theme.neutrals.text1 : theme.neutrals.text2)
-        }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .padding(8)
-        .background(isPrimary ? theme.primary.primary.opacity(0.09) : theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
     @ViewBuilder
     private var drawer: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -506,7 +531,6 @@ private struct PreviewSkillsInventorySection: View {
             }
         }
     }
-
     private var drawerTitle: String {
         switch mode {
         case .inventoryOverview: return "活跃主力 vs 3 个闲置 Skill 快速清单"
@@ -521,7 +545,6 @@ private struct PreviewSkillsInventorySection: View {
         case .fullMatrix: return "全部 24 个 Skill 全景卡片矩阵（含闲置标记）"
         }
     }
-
     private var drawerRows: [(String, String)] {
         switch mode {
         case .inventoryOverview:

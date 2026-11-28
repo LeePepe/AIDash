@@ -13116,6 +13116,42 @@
         }
       }
     },
+    "dashboard.preview.tab1.expand_weekly": {
+      "comment": "Preview host disclosure for the Tab 1 asymmetric hero deck.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show weekly comparison details"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展开周度对比明细"
+          }
+        }
+      }
+    },
+    "dashboard.preview.tab2.expand_inventory": {
+      "comment": "Preview host disclosure for the Tab 2 asymmetric hero deck.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show active and idle skill list"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展开闲置与主力清单"
+          }
+        }
+      }
+    },
     "dashboard.work_status.missing_desc": {
       "comment": "3-Section AI Work Status Workbench UI copy.",
       "extractionState": "manual",

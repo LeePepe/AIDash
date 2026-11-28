@@ -372,23 +372,48 @@ public struct RoleRelayDurationBar: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let visibleItems = Array(items.filter { $0.sharePct > 0 || $0.durationSec > 0 }.prefix(6))
+        let totalPct = visibleItems.reduce(0.0) { $0 + max(0.1, $1.sharePct) }
+        let inlineSummary = visibleItems.map { item -> String in
+            let roleText = WorkStatusFormatter.plainRoleBadge(
+                roleKey: item.roleKey,
+                zh: item.roleLabelZh,
+                en: item.roleLabelEn,
+                locale: locale
+            )
+            let pctText = item.sharePct >= 35
+                ? " (\(WorkStatusFormatter.safeRoundedPercent(item.sharePct))%)"
+                : ""
+            return "\(roleText) \(WorkStatusFormatter.durationText(item.durationSec))\(pctText)"
+        }.joined(separator: " · ")
+
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text(DashboardL10n.tr("dashboard.work_status.role_relay_title", "角色接力耗时条"))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                Text(inlineSummary)
+                    .font(.caption2.monospacedDigit().weight(.medium))
+                    .foregroundStyle(
+                        visibleItems.contains { $0.reworkCalls > 0 } ? theme.warningOnSubtle : theme.text(.body)
+                    )
+                    .lineLimit(1)
+            }
             Canvas { context, size in
                 let rect = CGRect(origin: .zero, size: size)
                 let capsule = Capsule().path(in: rect)
                 context.fill(capsule, with: .color(theme.neutrals.inner))
-                let nonEmpty = items.filter { $0.sharePct > 0 || $0.durationSec > 0 }
-                let totalPct = nonEmpty.reduce(0.0) { $0 + max(0.1, $1.sharePct) }
-                guard !nonEmpty.isEmpty, totalPct > 0, size.width > 0 else { return }
+                guard !visibleItems.isEmpty, totalPct > 0, size.width > 0 else { return }
 
                 var clipCtx = context
                 clipCtx.clip(to: capsule)
                 let gap: CGFloat = 1.5
-                let usableW = max(0, size.width - gap * CGFloat(max(0, nonEmpty.count - 1)))
+                let usableW = max(0, size.width - gap * CGFloat(max(0, visibleItems.count - 1)))
                 var curX: CGFloat = 0
-                for (idx, item) in nonEmpty.enumerated() {
+                for (idx, item) in visibleItems.enumerated() {
                     let ratio = CGFloat(max(0.1, item.sharePct) / totalPct)
-                    let segW = idx == nonEmpty.count - 1
+                    let segW = idx == visibleItems.count - 1
                         ? max(0, size.width - curX)
                         : min(max(4, usableW * ratio), max(0, size.width - curX))
                     let segRect = CGRect(x: curX, y: 0, width: segW, height: size.height)
@@ -398,34 +423,6 @@ public struct RoleRelayDurationBar: View {
             }
             .frame(height: height)
             .accessibilityHidden(true)
-
-            HStack(spacing: 6) {
-                ForEach(items.prefix(6)) { item in
-                    let roleText = WorkStatusFormatter.plainRoleBadge(
-                        roleKey: item.roleKey,
-                        zh: item.roleLabelZh,
-                        en: item.roleLabelEn,
-                        locale: locale
-                    )
-                    let tint = roleColor(for: item.roleKey, hasRework: item.reworkCalls > 0)
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(tint)
-                            .frame(width: 6, height: 6)
-                            .accessibilityHidden(true)
-                        Text("\(roleText) \(WorkStatusFormatter.durationText(item.durationSec)) (\(WorkStatusFormatter.safeRoundedPercent(item.sharePct))%)")
-                            .font(.caption2.monospacedDigit().weight(.medium))
-                            .foregroundStyle(item.reworkCalls > 0 ? theme.warningOnSubtle : theme.text(.body))
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        (item.reworkCalls > 0 ? theme.warning.opacity(0.14) : theme.neutrals.inner),
-                        in: Capsule()
-                    )
-                }
-            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -466,8 +463,6 @@ public struct WorkStreamConvergenceTrendStrip: View {
 
     public var body: some View {
         let fpSeries = timeSeries.compactMap(\.firstPassRate)
-        let durSeries = timeSeries.compactMap(\.medianGoalDurationSec).map { $0 / 60.0 }
-        let spinSeries = timeSeries.map(\.spinReworkPct)
 
         let fpValue = trendSummary.firstPassRatePct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
         let fpDelta = trendSummary.firstPassDeltaPct.map { val -> String in
@@ -522,31 +517,44 @@ public struct WorkStreamConvergenceTrendStrip: View {
             }
 
             if variant == .dualTrackDeck {
-                HStack(alignment: .top, spacing: 8) {
-                    trendMetricCard(
-                        id: "work-trend-first-pass",
-                        title: DashboardL10n.tr("dashboard.work_status.metric_first_pass", "一次过审率"),
-                        valueText: fpValue,
-                        deltaText: fpDelta,
-                        series: fpSeries,
-                        tone: fpTone
-                    )
-                    trendMetricCard(
-                        id: "work-trend-median-duration",
-                        title: DashboardL10n.tr("dashboard.work_status.metric_median_duration", "单 Goal 中位耗时"),
-                        valueText: durValue,
-                        deltaText: durDelta,
-                        series: durSeries,
-                        tone: durTone
-                    )
-                    trendMetricCard(
-                        id: "work-trend-spin-rework",
-                        title: DashboardL10n.tr("dashboard.work_status.metric_spin_rework", "重试空转占比"),
-                        valueText: spinValue,
-                        deltaText: spinDelta,
-                        series: spinSeries,
-                        tone: spinTone
-                    )
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(DashboardL10n.tr("dashboard.work_status.metric_first_pass", "一次过审率"))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(fpValue)
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(theme.neutrals.text1)
+                            if let fpDelta {
+                                Text(fpDelta)
+                                    .font(.caption2.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(theme.neutrals.text2)
+                            }
+                        }
+                        WorkStreamTrendMiniSparkline(values: fpSeries, tint: theme.primary.primary, height: 36)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Rectangle()
+                        .fill(theme.neutrals.border.opacity(0.45))
+                        .frame(width: 1, height: 74)
+                    VStack(alignment: .leading, spacing: 0) {
+                        compactRibbonItem(
+                            title: DashboardL10n.tr("dashboard.work_status.metric_median_duration", "单 Goal 中位耗时"),
+                            valueText: durValue,
+                            deltaText: durDelta,
+                            tone: durTone
+                        )
+                        Divider().overlay(theme.neutrals.border.opacity(0.35))
+                        compactRibbonItem(
+                            title: DashboardL10n.tr("dashboard.work_status.metric_spin_rework", "重试空转占比"),
+                            valueText: spinValue,
+                            deltaText: spinDelta,
+                            tone: spinTone
+                        )
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 HStack(spacing: 10) {
@@ -587,51 +595,6 @@ public struct WorkStreamConvergenceTrendStrip: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .captureDashboardGeometry(id: "work-convergence-trend-strip", role: "trendStrip")
-    }
-
-    private func trendMetricCard(
-        id: String,
-        title: String,
-        valueText: String,
-        deltaText: String?,
-        series: [Double],
-        tone: GoalBadgeTone
-    ) -> some View {
-        let isPrimary = id == "work-trend-first-pass"
-        let isWarning = tone == .warning
-        return VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(valueText)
-                    .font(.system(isPrimary ? .title3 : .headline, design: .rounded, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.neutrals.text1)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                if let deltaText {
-                    Text(deltaText)
-                        .font(.caption2.monospacedDigit().weight(.semibold))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(isWarning ? theme.warning.opacity(0.15) : theme.neutrals.card, in: Capsule())
-                        .foregroundStyle(isWarning ? theme.warningOnSubtle : theme.neutrals.text2)
-                        .lineLimit(1)
-                }
-            }
-            WorkStreamTrendMiniSparkline(
-                values: series,
-                tint: isWarning ? theme.warning : (isPrimary ? theme.primary.primary : theme.neutrals.text2),
-                height: 20
-            )
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .captureDashboardGeometry(id: id, role: "trendMetric")
-        .accessibilityElement(children: .combine)
     }
 
     private func compactRibbonItem(title: String, valueText: String, deltaText: String?, tone: GoalBadgeTone) -> some View {
@@ -896,6 +859,176 @@ public struct SkillVersionCohortComparisonStrip: View {
 }
 
 @MainActor
+private struct WorkStreamAsymmetricConvergenceHeader: View {
+    let snapshot: WorkStatusWorkbenchSnapshot
+    @Binding var selectedCohortID: String?
+    private let theme = Theme.system
+
+    var body: some View {
+        let firstPassSeries = snapshot.timeSeries.compactMap(\.firstPassRate)
+        let firstPassValue = snapshot.trendSummary.firstPassRatePct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
+        let firstPassDelta = snapshot.trendSummary.firstPassDeltaPct.map { value in
+            String(format: "%@%.0f%%", value >= 0 ? "▲ +" : "▼ ", value)
+        }
+        let durationValue = snapshot.trendSummary.medianGoalDurationSec.map(WorkStatusFormatter.durationText) ?? "—"
+        let durationDelta = snapshot.trendSummary.medianDurationDeltaSec.map { value in
+            let minutes = value / 60.0
+            return String(format: "%@%.0fm", minutes <= 0 ? "▼ " : "▲ +", minutes)
+        }
+        let spinValue = String(format: "%.1f%%", snapshot.trendSummary.spinReworkPct)
+        let spinDelta = snapshot.trendSummary.spinReworkDeltaPct.map { value in
+            String(format: "%@%.1f%%", value <= 0 ? "▼ " : "▲ +", value)
+        }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.primary.primary)
+                    .accessibilityHidden(true)
+                Text(DashboardL10n.tr("dashboard.work_status.trend_strip_title", "随时间收敛趋势"))
+                    .font(.caption.weight(.bold))
+                Spacer(minLength: 6)
+                Text(DashboardL10n.format(
+                    "dashboard.work_status.trend_strip_meta",
+                    "%lld Goal · %lld PR · %lld 会话",
+                    snapshot.pulse.goalsCount,
+                    snapshot.pulse.prsTouchedCount,
+                    snapshot.pulse.sessionsCount
+                ))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            GeometryReader { proxy in
+                HStack(alignment: .center, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(DashboardL10n.tr("dashboard.work_status.metric_first_pass", "一次过审率"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(firstPassValue)
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(theme.neutrals.text1)
+                            if let firstPassDelta {
+                                Text(firstPassDelta)
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(theme.neutrals.text2)
+                            }
+                        }
+                        WorkStreamTrendMiniSparkline(
+                            values: firstPassSeries,
+                            tint: theme.primary.primary,
+                            height: 42
+                        )
+                    }
+                    .frame(width: max(0, proxy.size.width * 0.42 - 10), alignment: .leading)
+                    .captureDashboardGeometry(id: "work-convergence-trend-strip", role: "trendStrip")
+
+                    Rectangle()
+                        .fill(theme.neutrals.border.opacity(0.45))
+                        .frame(width: 1)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        convergenceMetricRow(
+                            title: DashboardL10n.tr("dashboard.work_status.metric_median_duration", "单 Goal 中位耗时"),
+                            value: durationValue,
+                            delta: durationDelta
+                        )
+                        Divider().overlay(theme.neutrals.border.opacity(0.35))
+                        convergenceMetricRow(
+                            title: DashboardL10n.tr("dashboard.work_status.metric_spin_rework", "重试空转占比"),
+                            value: spinValue,
+                            delta: spinDelta
+                        )
+                    }
+                    .frame(width: max(0, proxy.size.width * 0.26 - 10), alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(DashboardL10n.tr("dashboard.work_status.cohort_strip_title", "技能版本前后对比"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        if snapshot.skillVersionCohorts.isEmpty {
+                            Text(DashboardL10n.tr("dashboard.work_status.cohort_empty", "暂无版本对照样本"))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(snapshot.skillVersionCohorts.prefix(3)) { cohort in
+                                cohortPill(cohort)
+                            }
+                        }
+                    }
+                    .frame(width: max(0, proxy.size.width * 0.32 - 10), alignment: .leading)
+                    .captureDashboardGeometry(id: "work-skill-cohort-strip", role: "cohortStrip")
+                }
+            }
+            .frame(minHeight: 126)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func convergenceMetricRow(title: String, value: String, delta: String?) -> some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 3)
+            Text(value)
+                .font(.system(size: 15, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(theme.neutrals.text1)
+            if let delta {
+                Text(delta)
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(theme.neutrals.text2)
+                    .lineLimit(1)
+            }
+        }
+        .frame(minHeight: 42)
+    }
+
+    private func cohortPill(_ cohort: WorkStatusSkillVersionCohort) -> some View {
+        let selected = selectedCohortID == cohort.cohortID
+        let recurring = cohort.postFixRecurrenceCount > 0
+        return Button {
+            selectedCohortID = selected ? nil : cohort.cohortID
+        } label: {
+            HStack(spacing: 4) {
+                Text("\(cohort.skill) \(cohort.previousVersion) → \(cohort.currentVersion)")
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                if let delta = cohort.firstPassDeltaPct {
+                    Text(String(format: "%@%.0f%%", delta >= 0 ? "▲+" : "▼", delta))
+                        .font(.caption2.monospacedDigit().weight(.bold))
+                }
+                if recurring {
+                    Text(DashboardL10n.format("dashboard.work_status.cohort_recurrence_cnt", "复发 %lld", cohort.postFixRecurrenceCount))
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                }
+            }
+            .foregroundStyle(recurring ? theme.warningOnSubtle : theme.neutrals.text1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(
+                recurring
+                    ? theme.warning.opacity(0.14)
+                    : (selected ? theme.primary.primary.opacity(0.14) : theme.neutrals.card),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+@MainActor
 public struct GoalWorkStreamWorkbenchView: View {
     public let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     public let isLoading: Bool
@@ -937,13 +1070,7 @@ public struct GoalWorkStreamWorkbenchView: View {
         _selectedCohortID = State(initialValue: initialSelectedCohortID)
         _expandedRepos = State(initialValue: initialExpandedRepos)
         _isUnassignedExpanded = State(initialValue: initialUnassignedExpanded)
-        if let initialExpandedGoalIDs {
-            _expandedGoalIDs = State(initialValue: initialExpandedGoalIDs)
-        } else if let firstFocusAnomaly = summary?.workStatus?.goals.first(where: { $0.isFocusAnomaly })?.goalID {
-            _expandedGoalIDs = State(initialValue: [firstFocusAnomaly])
-        } else {
-            _expandedGoalIDs = State(initialValue: [])
-        }
+        _expandedGoalIDs = State(initialValue: initialExpandedGoalIDs ?? [])
         _activeReceipt = State(initialValue: initialSelectedReceipt)
     }
 
@@ -1082,36 +1209,10 @@ public struct GoalWorkStreamWorkbenchView: View {
     @ViewBuilder
     private func topDualTrackConvergenceHeader(_ snap: WorkStatusWorkbenchSnapshot) -> some View {
         if headerVariant == .dualTrackDeck {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 10) {
-                    WorkStreamConvergenceTrendStrip(
-                        trendSummary: snap.trendSummary,
-                        timeSeries: snap.timeSeries,
-                        pulse: snap.pulse,
-                        variant: .dualTrackDeck
-                    )
-                    SkillVersionCohortComparisonStrip(
-                        cohorts: snap.skillVersionCohorts,
-                        selectedCohortID: $selectedCohortID,
-                        variant: .dualTrackDeck
-                    )
-                }
-                .frame(minWidth: 820)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    WorkStreamConvergenceTrendStrip(
-                        trendSummary: snap.trendSummary,
-                        timeSeries: snap.timeSeries,
-                        pulse: snap.pulse,
-                        variant: .dualTrackDeck
-                    )
-                    SkillVersionCohortComparisonStrip(
-                        cohorts: snap.skillVersionCohorts,
-                        selectedCohortID: $selectedCohortID,
-                        variant: .dualTrackDeck
-                    )
-                }
-            }
+            WorkStreamAsymmetricConvergenceHeader(
+                snapshot: snap,
+                selectedCohortID: $selectedCohortID
+            )
         } else {
             VStack(alignment: .leading, spacing: 8) {
                 WorkStreamConvergenceTrendStrip(
@@ -1869,52 +1970,40 @@ private struct GoalWorkStreamExpandableRow: View {
     }
 
     private var goalSummaryHeader: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .center, spacing: 8) {
-                statusDot
-                Text(goal.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if let repo = shortRepoName(goal.repo) {
-                    capsuleTag(repo, fg: theme.text(.meta), bg: theme.neutrals.inner)
-                }
-                if let review = WorkStatusFormatter.plainReviewBadge(goal, locale: locale) {
-                    capsuleTag(
-                        review.label,
-                        fg: fgColor(review.tone),
-                        bg: bgColor(review.tone)
-                    )
-                }
-                Spacer(minLength: 8)
-                outputBadgesCluster
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
-                    .accessibilityHidden(true)
+        HStack(alignment: .center, spacing: 8) {
+            statusDot
+            Text(goal.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let repo = shortRepoName(goal.repo) {
+                capsuleTag(repo, fg: theme.text(.meta), bg: theme.neutrals.inner)
             }
-
-            HStack(alignment: .center, spacing: 10) {
-                WorkStatusActionSplitBar(split: goal.actionSplit, height: 7)
-                    .frame(minWidth: 130, maxWidth: 210)
-                Text(splitCompactText(goal.actionSplit))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                HStack(spacing: 5) {
-                    ForEach(goal.skillWatermarks.prefix(2)) { wm in
-                        watermarkChip(wm, compact: true)
-                    }
-                    ForEach(goal.skillsUsed.prefix(goal.skillWatermarks.isEmpty ? 3 : 1)) { sk in
-                        skillChip(sk)
-                    }
-                }
-                Spacer(minLength: 4)
+            if !isExpanded, let anomaly = primaryAnomalyBadge {
+                anomaly
             }
+            Spacer(minLength: 8)
+            outputBadgesCluster
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .accessibilityHidden(true)
         }
+    }
+
+    private var primaryAnomalyBadge: AnyView? {
+        if let recurring = goal.skillWatermarks.first(where: { $0.watermarkState == "post_fix_recurring" }) {
+            return AnyView(watermarkChip(recurring, compact: true))
+        }
+        if let emptyLoad = goal.skillsUsed.first(where: \.emptyLoad) {
+            return AnyView(skillChip(emptyLoad))
+        }
+        if let review = WorkStatusFormatter.plainReviewBadge(goal, locale: locale) {
+            return AnyView(capsuleTag(review.label, fg: fgColor(review.tone), bg: bgColor(review.tone)))
+        }
+        return nil
     }
 
     private var statusDot: some View {
@@ -1933,30 +2022,17 @@ private struct GoalWorkStreamExpandableRow: View {
     }
 
     private var outputBadgesCluster: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Text(WorkStatusFormatter.durationText(goal.durationSec))
                 .font(.caption.weight(.bold).monospacedDigit())
                 .foregroundStyle(.primary)
                 .layoutPriority(1)
-            if goal.outputs.filesChangedCount > 0 {
-                capsuleTag(
-                    DashboardL10n.format("dashboard.work_status.files_badge", "%lld 文件", goal.outputs.filesChangedCount),
-                    fg: theme.text(.body),
-                    bg: theme.neutrals.card
-                )
-            }
             if let pr = goal.outputs.prNumber {
-                capsuleTag(
-                    "PR #\(pr)",
-                    fg: theme.text(.body),
-                    bg: theme.neutrals.card
-                )
+                Text("PR #\(pr)")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(theme.text(.body))
+                    .lineLimit(1)
             }
-            capsuleTag(
-                DashboardL10n.format("dashboard.work_status.sessions_badge", "%lld 会话", goal.outputs.sessionCount),
-                fg: theme.text(.meta),
-                bg: theme.neutrals.card
-            )
         }
     }
 
@@ -2034,14 +2110,16 @@ private struct GoalWorkStreamExpandableRow: View {
             }
 
             if !goal.roleRelay.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(DashboardL10n.tr("dashboard.work_status.role_relay_title", "角色接力耗时条"))
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                Group {
                     if diagnosticVariant == .watermarkPillsPlusRoleRelayBar {
                         RoleRelayDurationBar(items: goal.roleRelay, locale: locale, height: 8)
                     } else {
-                        timelineStepRelayList
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(DashboardL10n.tr("dashboard.work_status.role_relay_title", "角色接力耗时条"))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            timelineStepRelayList
+                        }
                     }
                 }
                 .padding(8)

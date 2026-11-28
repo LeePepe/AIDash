@@ -1704,6 +1704,26 @@ struct TK3SnapshotRenderTests {
         #expect(wbRenderedIDs.contains("goal-row-atlas-goal-1"))
         #expect(wbRenderedIDs.contains("repo-group-UI"))
         #expect(!wbRenderedIDs.contains("goal-row-atlas-goal-steady"))
+        #expect(!wbRenderedIDs.contains("goal-role-relay-atlas-goal-1"))
+        #expect(!wbRenderedIDs.contains("goal-watermarks-atlas-goal-1"))
+
+        let expandedRecorder = DashboardGeometryRecorder()
+        let expandedHosting = NSHostingView(
+            rootView: GoalWorkStreamWorkbenchView(
+                summary: summary,
+                initialExpandedGoalIDs: ["atlas-goal-1"]
+            )
+            .frame(width: 1080)
+            .environment(\.dashboardGeometryRecorder, expandedRecorder)
+            .coordinateSpace(name: "dashboard-canvas")
+            .environment(\.colorScheme, .dark)
+        )
+        expandedHosting.appearance = NSAppearance(named: .darkAqua)
+        expandedHosting.frame = NSRect(x: 0, y: 0, width: 1080, height: 760)
+        expandedHosting.layoutSubtreeIfNeeded()
+        let expandedRenderedIDs = Set(expandedRecorder.samples.map(\.id))
+        #expect(expandedRenderedIDs.contains("goal-role-relay-atlas-goal-1"))
+        #expect(expandedRenderedIDs.contains("goal-watermarks-atlas-goal-1"))
 
         let sheetHosting = NSHostingView(
             rootView: SessionWorkReceiptSheet(
