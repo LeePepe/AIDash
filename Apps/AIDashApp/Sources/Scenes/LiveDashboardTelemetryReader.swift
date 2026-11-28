@@ -549,6 +549,27 @@ public struct AgentRetroWorkbenchSummary: Codable, Sendable, Equatable {
     }
 }
 
+private func clampFiniteDouble(_ value: Double, min lower: Double, max upper: Double) -> Double {
+    guard value.isFinite else { return lower }
+    return min(max(value, lower), upper)
+}
+
+private func clampOptionalPct(_ value: Double?) -> Double? {
+    guard let value, value.isFinite else { return nil }
+    return min(max(value, 0), 100)
+}
+
+private func clampOptionalDeltaPct(_ value: Double?) -> Double? {
+    guard let value, value.isFinite else { return nil }
+    return min(max(value, -100), 100)
+}
+
+private func clampOptionalDuration(_ value: Double?, allowNegative: Bool = false) -> Double? {
+    guard let value, value.isFinite else { return nil }
+    let maxDur = 365.0 * 86_400.0
+    return min(max(value, allowNegative ? -maxDur : 0), maxDur)
+}
+
 public struct WorkStatusActionSplit: Codable, Sendable, Equatable {
     public let totalCalls: Int
     public let searchReadCalls: Int
@@ -599,10 +620,10 @@ public struct WorkStatusActionSplit: Codable, Sendable, Equatable {
         let defaultCE = denom > 0 ? (100.0 * Double(ce) / denom) : 0
         let defaultVS = denom > 0 ? (100.0 * Double(vs) / denom) : 0
         let defaultSW = denom > 0 ? max(0, 100.0 - defaultSR - defaultCE - defaultVS) : 0
-        self.searchReadPct = max(0, searchReadPct ?? defaultSR)
-        self.codeEditPct = max(0, codeEditPct ?? defaultCE)
-        self.verifyScriptPct = max(0, verifyScriptPct ?? defaultVS)
-        self.spinReworkPct = max(0, spinReworkPct ?? defaultSW)
+        self.searchReadPct = clampFiniteDouble(searchReadPct ?? defaultSR, min: 0, max: 100)
+        self.codeEditPct = clampFiniteDouble(codeEditPct ?? defaultCE, min: 0, max: 100)
+        self.verifyScriptPct = clampFiniteDouble(verifyScriptPct ?? defaultVS, min: 0, max: 100)
+        self.spinReworkPct = clampFiniteDouble(spinReworkPct ?? defaultSW, min: 0, max: 100)
     }
 
     public init(from decoder: Decoder) throws {
@@ -1116,8 +1137,8 @@ public struct WorkStatusRoleRelayItem: Codable, Sendable, Equatable, Identifiabl
         self.roleKey = roleKey
         self.roleLabelZh = roleLabelZh.isEmpty ? roleKey : roleLabelZh
         self.roleLabelEn = roleLabelEn.isEmpty ? roleKey : roleLabelEn
-        self.durationSec = max(0, durationSec)
-        self.sharePct = max(0, sharePct)
+        self.durationSec = clampFiniteDouble(durationSec, min: 0, max: 365.0 * 86_400.0)
+        self.sharePct = clampFiniteDouble(sharePct, min: 0, max: 100)
         self.sessionCount = max(0, sessionCount)
         self.reworkCalls = max(0, reworkCalls)
     }
@@ -1166,9 +1187,9 @@ public struct WorkStatusTimeSeriesPoint: Codable, Sendable, Equatable, Identifia
     ) {
         self.day = day
         self.goalsCompleted = max(0, goalsCompleted)
-        self.firstPassRate = firstPassRate
-        self.medianGoalDurationSec = medianGoalDurationSec
-        self.spinReworkPct = max(0, spinReworkPct)
+        self.firstPassRate = clampOptionalPct(firstPassRate)
+        self.medianGoalDurationSec = clampOptionalDuration(medianGoalDurationSec)
+        self.spinReworkPct = clampFiniteDouble(spinReworkPct, min: 0, max: 100)
         self.sessionsCount = max(0, sessionsCount)
     }
 
@@ -1210,12 +1231,12 @@ public struct WorkStatusTrendSummary: Codable, Sendable, Equatable {
         spinReworkPct: Double = 0,
         spinReworkDeltaPct: Double? = nil
     ) {
-        self.firstPassRatePct = firstPassRatePct
-        self.firstPassDeltaPct = firstPassDeltaPct
-        self.medianGoalDurationSec = medianGoalDurationSec
-        self.medianDurationDeltaSec = medianDurationDeltaSec
-        self.spinReworkPct = max(0, spinReworkPct)
-        self.spinReworkDeltaPct = spinReworkDeltaPct
+        self.firstPassRatePct = clampOptionalPct(firstPassRatePct)
+        self.firstPassDeltaPct = clampOptionalDeltaPct(firstPassDeltaPct)
+        self.medianGoalDurationSec = clampOptionalDuration(medianGoalDurationSec)
+        self.medianDurationDeltaSec = clampOptionalDuration(medianDurationDeltaSec, allowNegative: true)
+        self.spinReworkPct = clampFiniteDouble(spinReworkPct, min: 0, max: 100)
+        self.spinReworkDeltaPct = clampOptionalDeltaPct(spinReworkDeltaPct)
     }
 
     public init(from decoder: Decoder) throws {
@@ -1301,15 +1322,19 @@ public struct WorkStatusSkillVersionCohort: Codable, Sendable, Equatable, Identi
         self.watermarkSHA = watermarkSHA
         self.beforeGoalsCount = max(0, beforeGoalsCount ?? beforeGoalIDs.count)
         self.afterGoalsCount = max(0, afterGoalsCount ?? afterGoalIDs.count)
-        self.beforeFirstPassPct = beforeFirstPassPct
-        self.afterFirstPassPct = afterFirstPassPct
-        self.firstPassDeltaPct = firstPassDeltaPct
-            ?? ((afterFirstPassPct != nil && beforeFirstPassPct != nil) ? ((afterFirstPassPct ?? 0) - (beforeFirstPassPct ?? 0)) : nil)
-        self.beforeReworkPct = max(0, beforeReworkPct)
-        self.afterReworkPct = max(0, afterReworkPct)
-        self.reworkDeltaPct = reworkDeltaPct ?? (afterReworkPct - beforeReworkPct)
-        self.beforeMedianDurationSec = beforeMedianDurationSec
-        self.afterMedianDurationSec = afterMedianDurationSec
+        let clampedBFP = clampOptionalPct(beforeFirstPassPct)
+        let clampedAFP = clampOptionalPct(afterFirstPassPct)
+        self.beforeFirstPassPct = clampedBFP
+        self.afterFirstPassPct = clampedAFP
+        let fallbackFPDelta = (clampedAFP != nil && clampedBFP != nil) ? ((clampedAFP ?? 0) - (clampedBFP ?? 0)) : nil
+        self.firstPassDeltaPct = clampOptionalDeltaPct(firstPassDeltaPct ?? fallbackFPDelta)
+        let clampedBRW = clampFiniteDouble(beforeReworkPct, min: 0, max: 100)
+        let clampedARW = clampFiniteDouble(afterReworkPct, min: 0, max: 100)
+        self.beforeReworkPct = clampedBRW
+        self.afterReworkPct = clampedARW
+        self.reworkDeltaPct = clampFiniteDouble(reworkDeltaPct ?? (clampedARW - clampedBRW), min: -100, max: 100)
+        self.beforeMedianDurationSec = clampOptionalDuration(beforeMedianDurationSec)
+        self.afterMedianDurationSec = clampOptionalDuration(afterMedianDurationSec)
         self.postFixRecurrenceCount = max(0, postFixRecurrenceCount)
         self.beforeGoalIDs = beforeGoalIDs
         self.afterGoalIDs = afterGoalIDs
@@ -1388,9 +1413,9 @@ public struct WorkStatusRepoDeliveredGroup: Codable, Sendable, Equatable, Identi
         self.goalsCount = max(0, goalsCount ?? goalIDs.count)
         self.prsCount = max(0, prsCount)
         self.firstPassCount = max(0, firstPassCount)
-        self.firstPassRatePct = firstPassRatePct
-        self.totalDurationSec = max(0, totalDurationSec)
-        self.medianDurationSec = medianDurationSec
+        self.firstPassRatePct = clampOptionalPct(firstPassRatePct)
+        self.totalDurationSec = clampFiniteDouble(totalDurationSec, min: 0, max: 365.0 * 86_400.0)
+        self.medianDurationSec = clampOptionalDuration(medianDurationSec)
         self.filesChangedCount = max(0, filesChangedCount)
         self.commitsCount = max(0, commitsCount)
         self.goalIDs = goalIDs
@@ -1634,6 +1659,35 @@ public enum WorkStatusDerivationHelper {
         )
         return (series, summary)
     }
+
+    public static func deduplicateGoals(_ goals: [WorkStatusGoalRow]) -> [WorkStatusGoalRow] {
+        var seen: Set<String> = []
+        var unique: [WorkStatusGoalRow] = []
+        for goal in goals where seen.insert(goal.goalID).inserted {
+            unique.append(goal)
+        }
+        return unique
+    }
+
+    public static func deduplicateCohorts(_ cohorts: [WorkStatusSkillVersionCohort]) -> [WorkStatusSkillVersionCohort] {
+        var seen: Set<String> = []
+        var unique: [WorkStatusSkillVersionCohort] = []
+        for cohort in cohorts where !cohort.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill(cohort.skill) {
+            if seen.insert(cohort.cohortID).inserted {
+                unique.append(cohort)
+            }
+        }
+        return unique
+    }
+
+    public static func deduplicateRepoGroups(_ groups: [WorkStatusRepoDeliveredGroup]) -> [WorkStatusRepoDeliveredGroup] {
+        var seen: Set<String> = []
+        var unique: [WorkStatusRepoDeliveredGroup] = []
+        for group in groups where seen.insert(group.repo).inserted {
+            unique.append(group)
+        }
+        return unique
+    }
 }
 
 public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
@@ -1709,7 +1763,7 @@ public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
         self.status = status
         self.reviewRoundBadge = reviewRoundBadge
         self.latestActivityAt = latestActivityAt
-        self.durationSec = max(0, durationSec)
+        self.durationSec = clampFiniteDouble(durationSec, min: 0, max: 365.0 * 86_400.0)
         self.turnCount = max(0, turnCount)
         self.totalTokens = totalTokens
         self.skillsUsed = skillsUsed.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
@@ -1837,18 +1891,23 @@ public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
         self.sampleSize = max(0, sampleSize)
         self.coverageStatus = coverageStatus
         self.pulse = pulse
-        let derivedTrend = WorkStatusDerivationHelper.deriveTimeSeriesAndSummary(from: goals)
+        let uniqueGoals = WorkStatusDerivationHelper.deduplicateGoals(goals)
+        let derivedTrend = WorkStatusDerivationHelper.deriveTimeSeriesAndSummary(from: uniqueGoals)
         self.timeSeries = timeSeries ?? derivedTrend.0
         self.trendSummary = trendSummary ?? derivedTrend.1
-        self.skillVersionCohorts = skillVersionCohorts.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
-        self.repoDeliveredGroups = repoDeliveredGroups ?? WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: goals)
-        self.goals = goals
+        self.skillVersionCohorts = WorkStatusDerivationHelper.deduplicateCohorts(skillVersionCohorts)
+        self.repoDeliveredGroups = WorkStatusDerivationHelper.deduplicateRepoGroups(
+            repoDeliveredGroups ?? WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: uniqueGoals)
+        )
+        self.goals = uniqueGoals
         self.errors = errors
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let decodedGoals = (try? container.decode([WorkStatusGoalRow].self, forKey: .goals)) ?? []
+        let decodedGoals = WorkStatusDerivationHelper.deduplicateGoals(
+            (try? container.decode([WorkStatusGoalRow].self, forKey: .goals)) ?? []
+        )
         let decodedPulse = (try? container.decode(WorkStatusPulseSummary.self, forKey: .pulse))
             ?? WorkStatusPulseSummary()
         let derivedTrend = WorkStatusDerivationHelper.deriveTimeSeriesAndSummary(from: decodedGoals)
@@ -1869,10 +1928,13 @@ public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
             ?? derivedTrend.0
         self.trendSummary = (try? container.decodeIfPresent(WorkStatusTrendSummary.self, forKey: .trendSummary))
             ?? derivedTrend.1
-        self.skillVersionCohorts = ((try? container.decode([WorkStatusSkillVersionCohort].self, forKey: .skillVersionCohorts)) ?? [])
-            .filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
-        self.repoDeliveredGroups = (try? container.decodeIfPresent([WorkStatusRepoDeliveredGroup].self, forKey: .repoDeliveredGroups))
-            ?? WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: decodedGoals)
+        self.skillVersionCohorts = WorkStatusDerivationHelper.deduplicateCohorts(
+            (try? container.decode([WorkStatusSkillVersionCohort].self, forKey: .skillVersionCohorts)) ?? []
+        )
+        self.repoDeliveredGroups = WorkStatusDerivationHelper.deduplicateRepoGroups(
+            (try? container.decodeIfPresent([WorkStatusRepoDeliveredGroup].self, forKey: .repoDeliveredGroups))
+                ?? WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: decodedGoals)
+        )
         self.goals = decodedGoals
         self.errors = (try? container.decode([String].self, forKey: .errors)) ?? []
     }

@@ -300,6 +300,7 @@ private struct PreviewGoalWorkStreamVariantCard: View {
             }
 
             variantComposedBody(summary: summary)
+                .id("\(descriptor.id):\(expanded)")
         }
         .padding(14)
         .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

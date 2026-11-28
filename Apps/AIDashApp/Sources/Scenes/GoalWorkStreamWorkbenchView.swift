@@ -58,8 +58,15 @@ public struct SessionReceiptPresentation: Identifiable, Equatable, Sendable {
 }
 
 public enum WorkStatusFormatter {
+    public static func safeRoundedPercent(_ value: Double, min lower: Int = 0, max upper: Int = 100) -> Int {
+        guard value.isFinite else { return lower }
+        let clamped = Swift.min(Swift.max(value, Double(lower)), Double(upper))
+        return Int(clamped.rounded())
+    }
+
     public static func durationText(_ seconds: Double) -> String {
-        let clamped = max(0, seconds)
+        guard seconds.isFinite else { return "0s" }
+        let clamped = Swift.min(Swift.max(0, seconds), 365.0 * 86_400.0)
         if clamped < 60 {
             return String(format: "%.0fs", clamped)
         }
@@ -406,7 +413,7 @@ public struct RoleRelayDurationBar: View {
                             .fill(tint)
                             .frame(width: 6, height: 6)
                             .accessibilityHidden(true)
-                        Text("\(roleText) \(WorkStatusFormatter.durationText(item.durationSec)) (\(Int(item.sharePct.rounded()))%)")
+                        Text("\(roleText) \(WorkStatusFormatter.durationText(item.durationSec)) (\(WorkStatusFormatter.safeRoundedPercent(item.sharePct))%)")
                             .font(.caption2.monospacedDigit().weight(.medium))
                             .foregroundStyle(item.reworkCalls > 0 ? theme.warningOnSubtle : theme.text(.body))
                             .lineLimit(1)
@@ -462,7 +469,7 @@ public struct WorkStreamConvergenceTrendStrip: View {
         let durSeries = timeSeries.compactMap(\.medianGoalDurationSec).map { $0 / 60.0 }
         let spinSeries = timeSeries.map(\.spinReworkPct)
 
-        let fpValue = trendSummary.firstPassRatePct.map { "\(Int($0.rounded()))%" } ?? "—"
+        let fpValue = trendSummary.firstPassRatePct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
         let fpDelta = trendSummary.firstPassDeltaPct.map { val -> String in
             let sign = val >= 0 ? "▲ +" : "▼ "
             return String(format: "%@%.0f%%", sign, val)
@@ -763,8 +770,8 @@ public struct SkillVersionCohortComparisonStrip: View {
         let isSelected = selectedCohortID == cohort.cohortID
         let hasRecurrence = cohort.postFixRecurrenceCount > 0
         let fpCompare: String = {
-            let bText = cohort.beforeFirstPassPct.map { "\(Int($0.rounded()))%" } ?? "—"
-            let aText = cohort.afterFirstPassPct.map { "\(Int($0.rounded()))%" } ?? "—"
+            let bText = cohort.beforeFirstPassPct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
+            let aText = cohort.afterFirstPassPct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
             return "过审 \(bText)→\(aText)"
         }()
         let rwDeltaText: String = {
@@ -1051,9 +1058,9 @@ public struct GoalWorkStreamWorkbenchView: View {
             topDualTrackConvergenceHeader(snap)
             filterAndLegendBar(snap: snap, visibleCount: filteredGoals.filter { !$0.isUnassignedBucket }.count)
             if let activeCohort {
-                cohortComparisonFocusMatrix(cohort: activeCohort, allGoals: snap.goals)
+                cohortComparisonFocusMatrix(cohort: activeCohort, allGoals: filteredGoals)
             } else if hierarchyVariant == .beforeAfterVersionSplit, let defaultCohort = snap.skillVersionCohorts.first {
-                cohortComparisonFocusMatrix(cohort: defaultCohort, allGoals: snap.goals)
+                cohortComparisonFocusMatrix(cohort: defaultCohort, allGoals: filteredGoals)
             } else if filteredGoals.isEmpty {
                 scopedEmptyFilterBanner
             } else {
@@ -1113,9 +1120,17 @@ public struct GoalWorkStreamWorkbenchView: View {
     }
 
     private func cohortComparisonFocusMatrix(cohort: WorkStatusSkillVersionCohort, allGoals: [WorkStatusGoalRow]) -> some View {
-        let goalByID = Dictionary(uniqueKeysWithValues: allGoals.map { ($0.goalID, $0) })
+        let goalByID = Dictionary(allGoals.map { ($0.goalID, $0) }, uniquingKeysWith: { first, _ in first })
         let beforeGoals = cohort.beforeGoalIDs.compactMap { goalByID[$0] }
         let afterGoals = cohort.afterGoalIDs.compactMap { goalByID[$0] }
+        let bReworkInt = WorkStatusFormatter.safeRoundedPercent(cohort.beforeReworkPct)
+        let aReworkInt = WorkStatusFormatter.safeRoundedPercent(cohort.afterReworkPct)
+        let beforeSubtitle = cohort.beforeFirstPassPct.map {
+            "一次过审 \(WorkStatusFormatter.safeRoundedPercent($0))% · 空转 \(bReworkInt)%"
+        } ?? "空转 \(bReworkInt)%"
+        let afterSubtitle = cohort.afterFirstPassPct.map {
+            "一次过审 \(WorkStatusFormatter.safeRoundedPercent($0))% · 空转 \(aReworkInt)%"
+        } ?? "空转 \(aReworkInt)%"
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -1154,8 +1169,7 @@ public struct GoalWorkStreamWorkbenchView: View {
                             cohort.previousVersion,
                             beforeGoals.count
                         ),
-                        subtitle: cohort.beforeFirstPassPct.map { "一次过审 \(Int($0.rounded()))% · 空转 \(Int(cohort.beforeReworkPct.rounded()))%" }
-                            ?? "空转 \(Int(cohort.beforeReworkPct.rounded()))%",
+                        subtitle: beforeSubtitle,
                         goals: beforeGoals,
                         tone: .neutral
                     )
@@ -1166,8 +1180,7 @@ public struct GoalWorkStreamWorkbenchView: View {
                             cohort.currentVersion,
                             afterGoals.count
                         ),
-                        subtitle: cohort.afterFirstPassPct.map { "一次过审 \(Int($0.rounded()))% · 空转 \(Int(cohort.afterReworkPct.rounded()))%" }
-                            ?? "空转 \(Int(cohort.afterReworkPct.rounded()))%",
+                        subtitle: afterSubtitle,
                         goals: afterGoals,
                         tone: cohort.postFixRecurrenceCount > 0 ? .warning : .success
                     )
@@ -1177,13 +1190,13 @@ public struct GoalWorkStreamWorkbenchView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     cohortLaneColumn(
                         title: "升级前样本 · \(cohort.previousVersion)（\(beforeGoals.count)）",
-                        subtitle: "空转 \(Int(cohort.beforeReworkPct.rounded()))%",
+                        subtitle: beforeSubtitle,
                         goals: beforeGoals,
                         tone: .neutral
                     )
                     cohortLaneColumn(
                         title: "升级后样本 · \(cohort.currentVersion)（\(afterGoals.count)）",
-                        subtitle: "空转 \(Int(cohort.afterReworkPct.rounded()))%",
+                        subtitle: afterSubtitle,
                         goals: afterGoals,
                         tone: cohort.postFixRecurrenceCount > 0 ? .warning : .success
                     )
@@ -1246,7 +1259,7 @@ public struct GoalWorkStreamWorkbenchView: View {
             }
             return WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: steadyGoals)
         }()
-        let steadyByID = Dictionary(uniqueKeysWithValues: steadyGoals.map { ($0.goalID, $0) })
+        let steadyByID = Dictionary(steadyGoals.map { ($0.goalID, $0) }, uniquingKeysWith: { first, _ in first })
 
         VStack(alignment: .leading, spacing: 14) {
             // Tier 1: Pinned Focus Anomalies (Active/Blocked + Post-Fix Collision / Multi-Round Rework)
@@ -1342,7 +1355,7 @@ private extension GoalWorkStreamWorkbenchView {
     ) -> some View {
         let isRepoExpanded = expandedRepos.contains(group.repo)
         let repoGoals = group.goalIDs.compactMap { steadyByID[$0] }
-        let fpText = group.firstPassRatePct.map { "\(Int($0.rounded()))% 一次过审" } ?? "平稳完结"
+        let fpText = group.firstPassRatePct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))% 一次过审" } ?? "平稳完结"
         let medText = group.medianDurationSec.map { "中位 \(WorkStatusFormatter.durationText($0))" }
             ?? "累计 \(WorkStatusFormatter.durationText(group.totalDurationSec))"
 
@@ -1647,7 +1660,7 @@ private extension GoalWorkStreamWorkbenchView {
                 .fill(tint)
                 .frame(width: 7, height: 7)
                 .accessibilityHidden(true)
-            Text("\(label) \(Int(pct.rounded()))%")
+            Text("\(label) \(WorkStatusFormatter.safeRoundedPercent(pct))%")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -2103,7 +2116,7 @@ private struct GoalWorkStreamExpandableRow: View {
                     }
                     .frame(height: 6)
                     .accessibilityHidden(true)
-                    Text("\(WorkStatusFormatter.durationText(item.durationSec)) · \(Int(item.sharePct.rounded()))%")
+                    Text("\(WorkStatusFormatter.durationText(item.durationSec)) · \(WorkStatusFormatter.safeRoundedPercent(item.sharePct))%")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .frame(width: 84, alignment: .trailing)
@@ -2185,9 +2198,9 @@ private struct GoalWorkStreamExpandableRow: View {
         DashboardL10n.format(
             "dashboard.work_status.split_compact_format",
             "读 %lld%% · 改 %lld%% · 测 %lld%%",
-            Int(s.searchReadPct.rounded()),
-            Int(s.codeEditPct.rounded()),
-            Int(s.verifyScriptPct.rounded())
+            WorkStatusFormatter.safeRoundedPercent(s.searchReadPct),
+            WorkStatusFormatter.safeRoundedPercent(s.codeEditPct),
+            WorkStatusFormatter.safeRoundedPercent(s.verifyScriptPct)
         )
     }
 
@@ -2415,7 +2428,7 @@ public struct SessionWorkReceiptSheet: View {
                 .fill(tint)
                 .frame(width: 7, height: 7)
                 .accessibilityHidden(true)
-            Text("\(title) \(calls) (\(Int(pct.rounded()))%)")
+            Text("\(title) \(calls) (\(WorkStatusFormatter.safeRoundedPercent(pct))%)")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

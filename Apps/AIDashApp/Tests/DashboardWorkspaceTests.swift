@@ -3144,6 +3144,68 @@ struct DashboardWorkspaceTests {
         cohortHost.layoutSubtreeIfNeeded()
         #expect(Set(cohortRecorder.samples.map(\.id)).contains("work-cohort-focus-matrix"))
 
+        // Verify resilience against duplicate goal_ids and astronomical out-of-range Doubles (e.g. 1e100)
+        let adversarialJSON = #"""
+        {
+          "contract": "aidash-work-status/v1",
+          "schema_version": 1,
+          "sample_size": 2,
+          "coverage_status": "healthy",
+          "trend_summary": {
+            "first_pass_rate_pct": 1e100,
+            "first_pass_delta_pct": -1e100,
+            "median_goal_duration_sec": 1e100,
+            "spin_rework_pct": 1e100
+          },
+          "skill_version_cohorts": [
+            {
+              "cohort_id": "team-lead:v18->v19",
+              "skill": "team-lead",
+              "previous_version": "v18",
+              "current_version": "v19",
+              "before_first_pass_pct": 1e100,
+              "after_first_pass_pct": 1e100,
+              "before_rework_pct": 1e100,
+              "after_rework_pct": 1e100,
+              "before_goal_ids": ["dup-goal"],
+              "after_goal_ids": ["unassigned-daily"]
+            }
+          ],
+          "goals": [
+            {
+              "goal_id": "dup-goal",
+              "title": "Duplicate Goal One",
+              "status": "done",
+              "duration_sec": 1e100,
+              "role_relay": [{"role_key": "writer", "duration_sec": 1e100, "share_pct": 1e100}]
+            },
+            {
+              "goal_id": "dup-goal",
+              "title": "Duplicate Goal Two",
+              "status": "done"
+            },
+            {"title": "Missing ID One"},
+            {"title": "Missing ID Two"}
+          ]
+        }
+        """#
+        let advSnap = try JSONDecoder().decode(WorkStatusWorkbenchSnapshot.self, from: Data(adversarialJSON.utf8))
+        #expect(advSnap.goals.count == 2)
+        #expect(advSnap.goals.first?.roleRelay.first?.sharePct == 100.0)
+        #expect(advSnap.trendSummary.firstPassRatePct == 100.0)
+        var advSummary = LiveDashboardTelemetryReader.LiveEfficiencySummary()
+        advSummary.workStatus = advSnap
+        let advHost = NSHostingView(
+            rootView: GoalWorkStreamWorkbenchView(
+                summary: advSummary,
+                initialSelectedCohortID: "team-lead:v18->v19",
+                initialExpandedGoalIDs: ["dup-goal"]
+            )
+            .frame(width: 1200)
+        )
+        advHost.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+        advHost.layoutSubtreeIfNeeded()
+
         // 1. Local + iCloud mirror freshness selection for work-status.json
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("aidash-work-status-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: home) }
