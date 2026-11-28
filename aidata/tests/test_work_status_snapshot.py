@@ -9,6 +9,7 @@ from L5_apps.digest import work_status_snapshot as wss
 _BANNED_LABEL_PATTERNS = (
     re.compile(r"\bS(?:[1-9]|1[0-2])\b"),
     re.compile(r"\bM[1-5]\b"),
+    re.compile(r"\bE[1-9]\b"),
     re.compile(r"\bL[0-3]\b"),
     re.compile(r"\bR[1-4](?:_|\b)"),
     re.compile(r"\bH[1-5]\b"),
@@ -200,4 +201,342 @@ def test_work_status_snapshot_reports_missing_and_unknown_honestly(tmp_path):
     assert empty_payload["coverage_status"] == "unknown"
     assert empty_payload["sample_size"] == 0
     assert empty_payload["goals"] == []
+    assert empty_payload["time_series"] == []
+    assert empty_payload["skill_version_cohorts"] == []
+    assert empty_payload["repo_delivered_groups"] == []
+    assert empty_payload["trend_summary"]["first_pass_rate_pct"] is None
+    assert empty_payload["trend_summary"]["median_goal_duration_sec"] is None
     assert json.loads(out_missing.read_text(encoding="utf-8"))["contract"] == "aidash-work-status/v1"
+
+
+def test_work_status_snapshot_v2_cohorts_time_series_repo_groups_focus_and_role_relay():
+    stream_rows = [
+        # Pre-upgrade legacy goal on day 2026-11-20 (R2 rework, team-lead v18)
+        {
+            "session_uid": "sw:pre1",
+            "source": "copilot_cli",
+            "session_id_short": "aaaa1111",
+            "goal_id": "goal-legacy-v18",
+            "is_unassigned_bucket": 0,
+            "goal_title": "Legacy Team Lead Handoff",
+            "repo_name": "OwnerOrg/SampleRepo",
+            "branch_name": "feat/goal-legacy-v18",
+            "goal_status": "done",
+            "review_round_badge": "R2",
+            "role_key": "m1",
+            "model_id": "gpt-6.1-sol",
+            "summary_label": "Coordinate legacy task slices",
+            "started_at": "2026-11-20T02:00:00Z",
+            "ended_at": "2026-11-20T02:15:00Z",
+            "duration_sec": 900.0,
+            "turn_count": 8,
+            "total_tokens": 25000,
+            "skills_json": '["team-lead"]',
+            "search_read_calls": 4,
+            "code_edit_calls": 2,
+            "verify_script_calls": 2,
+            "spin_rework_calls": 2,
+            "files_changed_count": 3,
+            "commits_count": 2,
+            "pr_number": 301,
+            "slow_or_failed_scripts_json": "[]",
+            "ref_hit_count": 1,
+            "script_call_count": 1,
+            "ref_skills_csv": "team-lead",
+            "script_skills_csv": "team-lead",
+            "cst_day": "2026-11-20",
+            "goal_latest_day": "2026-11-20",
+            "window_start": "2026-11-14",
+            "window_end": "2026-11-27",
+            "window_cst": "14d",
+            "source_as_of": "2026-11-27",
+            "sample_size": 6,
+        },
+        # Post-upgrade clean steady goal 1 on day 2026-11-25 (R1 pass, team-lead v19 + my-designer v12)
+        {
+            "session_uid": "sw:post1-m1",
+            "source": "copilot_cli",
+            "session_id_short": "bbbb2221",
+            "goal_id": "goal-steady-1",
+            "is_unassigned_bucket": 0,
+            "goal_title": "Steady Goal One",
+            "repo_name": "OwnerOrg/SampleRepo",
+            "branch_name": "feat/goal-steady-1",
+            "goal_status": "merged",
+            "review_round_badge": "R1",
+            "role_key": "m1",
+            "model_id": "gpt-6.1-sol",
+            "summary_label": "Freeze spec and dispatch writer",
+            "started_at": "2026-11-25T01:00:00Z",
+            "ended_at": "2026-11-25T01:05:00Z",
+            "duration_sec": 300.0,
+            "turn_count": 4,
+            "total_tokens": 12000,
+            "skills_json": '["team-lead", "my-designer"]',
+            "search_read_calls": 3,
+            "code_edit_calls": 1,
+            "verify_script_calls": 1,
+            "spin_rework_calls": 0,
+            "files_changed_count": 1,
+            "commits_count": 1,
+            "pr_number": 310,
+            "slow_or_failed_scripts_json": "[]",
+            "ref_hit_count": 2,
+            "script_call_count": 2,
+            "ref_skills_csv": "team-lead,my-designer",
+            "script_skills_csv": "team-lead,my-designer",
+            "cst_day": "2026-11-25",
+            "goal_latest_day": "2026-11-25",
+            "window_start": "2026-11-14",
+            "window_end": "2026-11-27",
+            "window_cst": "14d",
+            "source_as_of": "2026-11-27",
+            "sample_size": 6,
+        },
+        {
+            "session_uid": "sw:post1-wr",
+            "source": "copilot_cli",
+            "session_id_short": "bbbb2222",
+            "goal_id": "goal-steady-1",
+            "is_unassigned_bucket": 0,
+            "goal_title": "Steady Goal One",
+            "repo_name": "OwnerOrg/SampleRepo",
+            "branch_name": "feat/goal-steady-1",
+            "goal_status": "merged",
+            "review_round_badge": "R1",
+            "role_key": "writer",
+            "model_id": "gpt-5.6-luna",
+            "summary_label": "Implement workbench UI slice",
+            "started_at": "2026-11-25T01:10:00Z",
+            "ended_at": "2026-11-25T01:25:00Z",
+            "duration_sec": 900.0,
+            "turn_count": 10,
+            "total_tokens": 30000,
+            "skills_json": '["my-designer"]',
+            "search_read_calls": 4,
+            "code_edit_calls": 4,
+            "verify_script_calls": 2,
+            "spin_rework_calls": 0,
+            "files_changed_count": 4,
+            "commits_count": 2,
+            "pr_number": 310,
+            "slow_or_failed_scripts_json": "[]",
+            "ref_hit_count": 1,
+            "script_call_count": 1,
+            "ref_skills_csv": "my-designer",
+            "script_skills_csv": "my-designer",
+            "cst_day": "2026-11-25",
+            "goal_latest_day": "2026-11-25",
+            "window_start": "2026-11-14",
+            "window_end": "2026-11-27",
+            "window_cst": "14d",
+            "source_as_of": "2026-11-27",
+            "sample_size": 6,
+        },
+        # Post-upgrade collision goal on day 2026-11-26 (post_fix=1 recurrence on team-lead v19)
+        {
+            "session_uid": "sw:post2-col",
+            "source": "copilot_cli",
+            "session_id_short": "cccc3333",
+            "goal_id": "goal-postfix-collision",
+            "is_unassigned_bucket": 0,
+            "goal_title": "Post-Upgrade Recurrence Goal",
+            "repo_name": "OwnerOrg/SkillsRepo",
+            "branch_name": "feat/goal-postfix-collision",
+            "goal_status": "done",
+            "review_round_badge": "R2",
+            "role_key": "writer",
+            "model_id": "gpt-5.6-luna",
+            "summary_label": "Retry gate check",
+            "started_at": "2026-11-26T04:00:00Z",
+            "ended_at": "2026-11-26T04:20:00Z",
+            "duration_sec": 1200.0,
+            "turn_count": 9,
+            "total_tokens": 28000,
+            "skills_json": '["team-lead"]',
+            "search_read_calls": 5,
+            "code_edit_calls": 3,
+            "verify_script_calls": 1,
+            "spin_rework_calls": 1,
+            "files_changed_count": 2,
+            "commits_count": 1,
+            "pr_number": 312,
+            "slow_or_failed_scripts_json": "[]",
+            "ref_hit_count": 1,
+            "script_call_count": 1,
+            "ref_skills_csv": "team-lead",
+            "script_skills_csv": "team-lead",
+            "cst_day": "2026-11-26",
+            "goal_latest_day": "2026-11-26",
+            "window_start": "2026-11-14",
+            "window_end": "2026-11-27",
+            "window_cst": "14d",
+            "source_as_of": "2026-11-27",
+            "sample_size": 6,
+        },
+        # Active in-flight goal on day 2026-11-27 (no review_round_badge yet -> honest None for day first_pass_rate)
+        {
+            "session_uid": "sw:active1",
+            "source": "copilot_cli",
+            "session_id_short": "dddd4444",
+            "goal_id": "goal-active-now",
+            "is_unassigned_bucket": 0,
+            "goal_title": "In-Flight Telemetry Goal",
+            "repo_name": "OwnerOrg/SampleRepo",
+            "branch_name": "feat/goal-active-now",
+            "goal_status": "in_progress",
+            "review_round_badge": None,
+            "role_key": "reviewer",
+            "model_id": "gpt-6.1-sol",
+            "summary_label": "Running review checks",
+            "started_at": "2026-11-27T02:00:00Z",
+            "ended_at": "2026-11-27T02:08:00Z",
+            "duration_sec": 480.0,
+            "turn_count": 4,
+            "total_tokens": 11000,
+            "skills_json": '["team-lead"]',
+            "search_read_calls": 3,
+            "code_edit_calls": 0,
+            "verify_script_calls": 1,
+            "spin_rework_calls": 0,
+            "files_changed_count": 0,
+            "commits_count": 0,
+            "pr_number": None,
+            "slow_or_failed_scripts_json": "[]",
+            "ref_hit_count": 1,
+            "script_call_count": 1,
+            "ref_skills_csv": "team-lead",
+            "script_skills_csv": "team-lead",
+            "cst_day": "2026-11-27",
+            "goal_latest_day": "2026-11-27",
+            "window_start": "2026-11-14",
+            "window_end": "2026-11-27",
+            "window_cst": "14d",
+            "source_as_of": "2026-11-27",
+            "sample_size": 6,
+        },
+        # Unassigned daily session
+        {
+            "session_uid": "sw:daily1",
+            "source": "copilot_cli",
+            "session_id_short": "eeee5555",
+            "goal_id": "unassigned-daily",
+            "is_unassigned_bucket": 1,
+            "goal_title": "日常独立会话（未绑定独立 Goal）",
+            "repo_name": "OwnerOrg/SampleRepo",
+            "branch_name": "main",
+            "goal_status": "daily",
+            "review_round_badge": None,
+            "role_key": "explorer",
+            "model_id": "gemini-3.8-flash",
+            "summary_label": "Quick lookup",
+            "started_at": "2026-11-27T01:00:00Z",
+            "ended_at": "2026-11-27T01:03:00Z",
+            "duration_sec": 180.0,
+            "turn_count": 2,
+            "total_tokens": 4000,
+            "skills_json": "[]",
+            "search_read_calls": 2,
+            "code_edit_calls": 0,
+            "verify_script_calls": 0,
+            "spin_rework_calls": 0,
+            "files_changed_count": 0,
+            "commits_count": 0,
+            "pr_number": None,
+            "slow_or_failed_scripts_json": "[]",
+            "ref_hit_count": 0,
+            "script_call_count": 0,
+            "ref_skills_csv": None,
+            "script_skills_csv": None,
+            "cst_day": "2026-11-27",
+            "goal_latest_day": "2026-11-27",
+            "window_start": "2026-11-14",
+            "window_end": "2026-11-27",
+            "window_cst": "14d",
+            "source_as_of": "2026-11-27",
+            "sample_size": 6,
+        },
+    ]
+
+    watermarks = [
+        {"goal_id": "goal-legacy-v18", "skill": "team-lead", "skill_version": "v18@0000111", "is_post_fix": 0, "occurrence_count": 2},
+        {"goal_id": "goal-postfix-collision", "skill": "team-lead", "skill_version": "v19@1a2b3c4", "is_post_fix": 1, "occurrence_count": 1},
+        {"goal_id": "goal-steady-1", "skill": "my-designer", "skill_version": "v12@abcd999", "is_post_fix": 0, "occurrence_count": 0},
+    ]
+
+    snap = wss.build_work_status_snapshot(
+        stream_rows,
+        goal_retro_findings={"goal-postfix-collision": {"handoff": 1}},
+        skill_version_watermarks=watermarks,
+        table_present=True,
+    )
+
+    by_gid = {g["goal_id"]: g for g in snap["goals"]}
+    assert by_gid["goal-active-now"]["focus_bucket"] == "active_or_blocked"
+    assert by_gid["goal-active-now"]["is_focus_anomaly"] is True
+    assert by_gid["goal-postfix-collision"]["focus_bucket"] == "post_fix_collision"
+    assert by_gid["goal-postfix-collision"]["is_focus_anomaly"] is True
+    assert by_gid["goal-legacy-v18"]["focus_bucket"] == "post_fix_collision"
+    assert by_gid["goal-steady-1"]["focus_bucket"] == "steady_delivered"
+    assert by_gid["goal-steady-1"]["is_focus_anomaly"] is False
+    assert by_gid["unassigned-daily"]["focus_bucket"] == "unassigned_daily"
+    assert by_gid["unassigned-daily"]["is_focus_anomaly"] is False
+
+    # Role relay ordered m1 -> writer with exact duration & share_pct == 100%
+    steady_relay = by_gid["goal-steady-1"]["role_relay"]
+    assert [r["role_key"] for r in steady_relay] == ["m1", "writer"]
+    assert [r["duration_sec"] for r in steady_relay] == [300.0, 900.0]
+    assert [r["share_pct"] for r in steady_relay] == [25.0, 75.0]
+    for r in steady_relay:
+        _assert_plain_language_labels(r["role_label_zh"])
+        _assert_plain_language_labels(r["role_label_en"])
+
+    # Skill watermarks distinguish post_fix_recurring vs pre_fix_legacy vs post_fix_clean
+    col_wm = {w["skill"]: w for w in by_gid["goal-postfix-collision"]["skill_watermarks"]}
+    assert col_wm["team-lead"]["version_label"] == "v19"
+    assert col_wm["team-lead"]["watermark_state"] == "post_fix_recurring"
+    _assert_plain_language_labels(col_wm["team-lead"]["summary_zh"])
+    _assert_plain_language_labels(col_wm["team-lead"]["label_zh"])
+
+    leg_wm = {w["skill"]: w for w in by_gid["goal-legacy-v18"]["skill_watermarks"]}
+    assert leg_wm["team-lead"]["version_label"] == "v18"
+    assert leg_wm["team-lead"]["watermark_state"] == "pre_fix_legacy"
+
+    steady_wm = {w["skill"]: w for w in by_gid["goal-steady-1"]["skill_watermarks"]}
+    assert steady_wm["team-lead"]["version_label"] == "v19"
+    assert steady_wm["team-lead"]["watermark_state"] == "post_fix_clean"
+
+    # Skill version cohort v18 -> v19
+    cohorts = {c["skill"]: c for c in snap["skill_version_cohorts"]}
+    tl_cohort = cohorts["team-lead"]
+    assert tl_cohort["cohort_id"] == "team-lead:v18->v19"
+    assert tl_cohort["previous_version"] == "v18"
+    assert tl_cohort["current_version"] == "v19"
+    assert tl_cohort["watermark_sha"] == "1a2b3c4"
+    assert tl_cohort["before_goal_ids"] == ["goal-legacy-v18"]
+    assert set(tl_cohort["after_goal_ids"]) == {"goal-steady-1", "goal-postfix-collision", "goal-active-now"}
+    assert tl_cohort["before_first_pass_pct"] == 0.0
+    assert tl_cohort["after_first_pass_pct"] == 50.0
+    assert tl_cohort["first_pass_delta_pct"] == 50.0
+    assert tl_cohort["post_fix_recurrence_count"] == 1
+    assert tl_cohort["rework_delta_pct"] < 0.0
+
+    # Repo delivered groups fold only steady_delivered goals
+    repo_groups = snap["repo_delivered_groups"]
+    assert len(repo_groups) == 1
+    assert repo_groups[0]["repo"] == "SampleRepo"
+    assert repo_groups[0]["goals_count"] == 1
+    assert repo_groups[0]["prs_count"] == 1
+    assert repo_groups[0]["first_pass_rate_pct"] == 100.0
+    assert repo_groups[0]["goal_ids"] == ["goal-steady-1"]
+
+    # Time series preserves honest None when day has 0 evaluated review badges (2026-11-27)
+    ts_by_day = {pt["day"]: pt for pt in snap["time_series"]}
+    assert ts_by_day["2026-11-20"]["first_pass_rate"] == 0.0
+    assert ts_by_day["2026-11-25"]["first_pass_rate"] == 100.0
+    assert ts_by_day["2026-11-27"]["first_pass_rate"] is None
+
+    trend = snap["trend_summary"]
+    assert trend["first_pass_rate_pct"] == 33.3
+    assert trend["first_pass_delta_pct"] is not None
+    assert trend["spin_rework_delta_pct"] < 0.0

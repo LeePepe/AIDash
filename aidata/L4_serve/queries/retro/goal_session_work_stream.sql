@@ -1,7 +1,8 @@
 -- aidata-tier: explore
 -- Rolling CST window (default 14 days) session-work stream & goal-level rollups:
 -- joins fact_session_work_summary with dim_goal, fact_gtt_task_run, reference_hits,
--- and script_call to serve per-session receipts alongside per-goal aggregated totals.
+-- script_call, and fact_agent_retro_finding to serve per-session receipts alongside
+-- per-goal aggregated totals, latest CST day, and skill-version watermark summaries.
 WITH anchor AS (
     SELECT COALESCE(
         :until_day,
@@ -142,6 +143,21 @@ enriched_sessions AS (
     LEFT JOIN session_ref_touches AS srt ON srt.session_id_short = ws.session_id_short
     LEFT JOIN session_script_touches AS sst ON sst.session_id_short = ws.session_id_short
 ),
+goal_retro_watermarks AS (
+    SELECT
+        f.goal_id,
+        SUM(CASE WHEN f.is_post_fix = 1 THEN f.occurrence_count ELSE 0 END) AS goal_post_fix_findings_count,
+        SUM(CASE WHEN f.is_post_fix = 0 THEN f.occurrence_count ELSE 0 END) AS goal_pre_fix_findings_count,
+        GROUP_CONCAT(
+            DISTINCT f.skill || '|' || COALESCE(f.skill_version, '') || '|' || CAST(f.is_post_fix AS TEXT)
+        ) AS goal_retro_watermarks_csv
+    FROM fact_agent_retro_finding AS f
+    CROSS JOIN bounds AS b
+    WHERE f.goal_id IS NOT NULL
+      AND f.goal_id != ''
+      AND (f.cst_day IS NULL OR f.cst_day BETWEEN b.start_day AND b.end_day)
+    GROUP BY f.goal_id
+),
 goal_rollups AS (
     SELECT
         es.goal_id,
@@ -158,7 +174,8 @@ goal_rollups AS (
         SUM(es.ref_hit_count) AS goal_ref_hit_count,
         SUM(es.script_call_count) AS goal_script_call_count,
         MAX(es.repo_name) AS goal_repo_name,
-        MAX(COALESCE(es.ended_at, es.started_at)) AS goal_latest_ts
+        MAX(COALESCE(es.ended_at, es.started_at)) AS goal_latest_ts,
+        MAX(es.cst_day) AS goal_latest_day
     FROM enriched_sessions AS es
     GROUP BY es.goal_id
 ),
@@ -232,6 +249,10 @@ SELECT
         ELSE NULL
     END AS goal_search_to_edit_ratio,
     gr.goal_latest_ts,
+    gr.goal_latest_day,
+    COALESCE(grw.goal_post_fix_findings_count, 0) AS goal_post_fix_findings_count,
+    COALESCE(grw.goal_pre_fix_findings_count, 0) AS goal_pre_fix_findings_count,
+    grw.goal_retro_watermarks_csv,
     es.cst_day,
     b.start_day AS window_start,
     b.end_day AS window_end,
@@ -242,6 +263,7 @@ FROM enriched_sessions AS es
 JOIN goal_rollups AS gr ON gr.goal_id = es.goal_id
 LEFT JOIN latest_goals AS lg ON lg.goal_id = es.goal_id AND lg.rn = 1
 LEFT JOIN goal_review_rounds AS grr ON grr.goal_id = es.goal_id
+LEFT JOIN goal_retro_watermarks AS grw ON grw.goal_id = es.goal_id
 CROSS JOIN bounds AS b
 CROSS JOIN population AS p
 ORDER BY gr.goal_latest_ts DESC, es.is_unassigned_bucket ASC, COALESCE(es.ended_at, es.started_at) DESC, es.session_uid ASC;

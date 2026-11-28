@@ -549,6 +549,27 @@ public struct AgentRetroWorkbenchSummary: Codable, Sendable, Equatable {
     }
 }
 
+private func clampFiniteDouble(_ value: Double, min lower: Double, max upper: Double) -> Double {
+    guard value.isFinite else { return lower }
+    return min(max(value, lower), upper)
+}
+
+private func clampOptionalPct(_ value: Double?) -> Double? {
+    guard let value, value.isFinite else { return nil }
+    return min(max(value, 0), 100)
+}
+
+private func clampOptionalDeltaPct(_ value: Double?) -> Double? {
+    guard let value, value.isFinite else { return nil }
+    return min(max(value, -100), 100)
+}
+
+private func clampOptionalDuration(_ value: Double?, allowNegative: Bool = false) -> Double? {
+    guard let value, value.isFinite else { return nil }
+    let maxDur = 365.0 * 86_400.0
+    return min(max(value, allowNegative ? -maxDur : 0), maxDur)
+}
+
 public struct WorkStatusActionSplit: Codable, Sendable, Equatable {
     public let totalCalls: Int
     public let searchReadCalls: Int
@@ -599,10 +620,10 @@ public struct WorkStatusActionSplit: Codable, Sendable, Equatable {
         let defaultCE = denom > 0 ? (100.0 * Double(ce) / denom) : 0
         let defaultVS = denom > 0 ? (100.0 * Double(vs) / denom) : 0
         let defaultSW = denom > 0 ? max(0, 100.0 - defaultSR - defaultCE - defaultVS) : 0
-        self.searchReadPct = max(0, searchReadPct ?? defaultSR)
-        self.codeEditPct = max(0, codeEditPct ?? defaultCE)
-        self.verifyScriptPct = max(0, verifyScriptPct ?? defaultVS)
-        self.spinReworkPct = max(0, spinReworkPct ?? defaultSW)
+        self.searchReadPct = clampFiniteDouble(searchReadPct ?? defaultSR, min: 0, max: 100)
+        self.codeEditPct = clampFiniteDouble(codeEditPct ?? defaultCE, min: 0, max: 100)
+        self.verifyScriptPct = clampFiniteDouble(verifyScriptPct ?? defaultVS, min: 0, max: 100)
+        self.spinReworkPct = clampFiniteDouble(spinReworkPct ?? defaultSW, min: 0, max: 100)
     }
 
     public init(from decoder: Decoder) throws {
@@ -1011,6 +1032,664 @@ public struct WorkStatusSessionReceipt: Codable, Sendable, Equatable, Identifiab
     }
 }
 
+public struct WorkStatusGoalSkillWatermark: Codable, Sendable, Equatable, Identifiable {
+    public let skill: String
+    public let versionLabel: String
+    public let watermarkState: String
+    public let summaryZh: String
+    public let summaryEn: String
+    public let labelZh: String
+    public let labelEn: String
+
+    public var id: String { "\(skill):\(versionLabel):\(watermarkState)" }
+
+    enum CodingKeys: String, CodingKey {
+        case skill
+        case versionLabel = "version_label"
+        case watermarkState = "watermark_state"
+        case summaryZh = "summary_zh"
+        case summaryEn = "summary_en"
+        case labelZh = "label_zh"
+        case labelEn = "label_en"
+    }
+
+    public init(
+        skill: String,
+        versionLabel: String,
+        watermarkState: String = "post_fix_clean",
+        summaryZh: String? = nil,
+        summaryEn: String? = nil,
+        labelZh: String? = nil,
+        labelEn: String? = nil
+    ) {
+        self.skill = skill
+        self.versionLabel = versionLabel
+        self.watermarkState = watermarkState
+        let defaultZhState: String = {
+            switch watermarkState {
+            case "post_fix_recurring": return "新版仍复发"
+            case "pre_fix_legacy": return "旧版修复前遗留"
+            default: return "新版已收敛"
+            }
+        }()
+        let defaultEnState: String = {
+            switch watermarkState {
+            case "post_fix_recurring": return "post-upgrade recurrence"
+            case "pre_fix_legacy": return "pre-upgrade legacy"
+            default: return "post-upgrade converged"
+            }
+        }()
+        let resolvedSummaryZh = summaryZh ?? "\(versionLabel) \(defaultZhState)"
+        let resolvedSummaryEn = summaryEn ?? "\(versionLabel) \(defaultEnState)"
+        self.summaryZh = resolvedSummaryZh
+        self.summaryEn = resolvedSummaryEn
+        self.labelZh = labelZh ?? "\(skill) \(versionLabel) · \(defaultZhState)"
+        self.labelEn = labelEn ?? "\(skill) \(versionLabel) · \(defaultEnState)"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let sk = (try? container.decode(String.self, forKey: .skill)) ?? ""
+        let ver = (try? container.decode(String.self, forKey: .versionLabel)) ?? "当前版"
+        let state = (try? container.decode(String.self, forKey: .watermarkState)) ?? "post_fix_clean"
+        self.init(
+            skill: sk,
+            versionLabel: ver,
+            watermarkState: state,
+            summaryZh: try? container.decodeIfPresent(String.self, forKey: .summaryZh),
+            summaryEn: try? container.decodeIfPresent(String.self, forKey: .summaryEn),
+            labelZh: try? container.decodeIfPresent(String.self, forKey: .labelZh),
+            labelEn: try? container.decodeIfPresent(String.self, forKey: .labelEn)
+        )
+    }
+}
+
+public struct WorkStatusRoleRelayItem: Codable, Sendable, Equatable, Identifiable {
+    public let roleKey: String
+    public let roleLabelZh: String
+    public let roleLabelEn: String
+    public let durationSec: Double
+    public let sharePct: Double
+    public let sessionCount: Int
+    public let reworkCalls: Int
+
+    public var id: String { roleKey }
+
+    enum CodingKeys: String, CodingKey {
+        case roleKey = "role_key"
+        case roleLabelZh = "role_label_zh"
+        case roleLabelEn = "role_label_en"
+        case durationSec = "duration_sec"
+        case sharePct = "share_pct"
+        case sessionCount = "session_count"
+        case reworkCalls = "rework_calls"
+    }
+
+    public init(
+        roleKey: String,
+        roleLabelZh: String = "",
+        roleLabelEn: String = "",
+        durationSec: Double = 0,
+        sharePct: Double = 0,
+        sessionCount: Int = 1,
+        reworkCalls: Int = 0
+    ) {
+        self.roleKey = roleKey
+        self.roleLabelZh = roleLabelZh.isEmpty ? roleKey : roleLabelZh
+        self.roleLabelEn = roleLabelEn.isEmpty ? roleKey : roleLabelEn
+        self.durationSec = clampFiniteDouble(durationSec, min: 0, max: 365.0 * 86_400.0)
+        self.sharePct = clampFiniteDouble(sharePct, min: 0, max: 100)
+        self.sessionCount = max(0, sessionCount)
+        self.reworkCalls = max(0, reworkCalls)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let rk = (try? container.decode(String.self, forKey: .roleKey)) ?? "writer"
+        self.init(
+            roleKey: rk,
+            roleLabelZh: (try? container.decode(String.self, forKey: .roleLabelZh)) ?? rk,
+            roleLabelEn: (try? container.decode(String.self, forKey: .roleLabelEn)) ?? rk,
+            durationSec: (try? container.decode(Double.self, forKey: .durationSec)) ?? 0,
+            sharePct: (try? container.decode(Double.self, forKey: .sharePct)) ?? 0,
+            sessionCount: (try? container.decode(Int.self, forKey: .sessionCount)) ?? 1,
+            reworkCalls: (try? container.decode(Int.self, forKey: .reworkCalls)) ?? 0
+        )
+    }
+}
+
+public struct WorkStatusTimeSeriesPoint: Codable, Sendable, Equatable, Identifiable {
+    public let day: String
+    public let goalsCompleted: Int
+    public let firstPassRate: Double?
+    public let medianGoalDurationSec: Double?
+    public let spinReworkPct: Double
+    public let sessionsCount: Int
+
+    public var id: String { day }
+
+    enum CodingKeys: String, CodingKey {
+        case day
+        case goalsCompleted = "goals_completed"
+        case firstPassRate = "first_pass_rate"
+        case medianGoalDurationSec = "median_goal_duration_sec"
+        case spinReworkPct = "spin_rework_pct"
+        case sessionsCount = "sessions_count"
+    }
+
+    public init(
+        day: String,
+        goalsCompleted: Int = 0,
+        firstPassRate: Double? = nil,
+        medianGoalDurationSec: Double? = nil,
+        spinReworkPct: Double = 0,
+        sessionsCount: Int = 0
+    ) {
+        self.day = day
+        self.goalsCompleted = max(0, goalsCompleted)
+        self.firstPassRate = clampOptionalPct(firstPassRate)
+        self.medianGoalDurationSec = clampOptionalDuration(medianGoalDurationSec)
+        self.spinReworkPct = clampFiniteDouble(spinReworkPct, min: 0, max: 100)
+        self.sessionsCount = max(0, sessionsCount)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            day: (try? container.decode(String.self, forKey: .day)) ?? "",
+            goalsCompleted: (try? container.decode(Int.self, forKey: .goalsCompleted)) ?? 0,
+            firstPassRate: try? container.decodeIfPresent(Double.self, forKey: .firstPassRate),
+            medianGoalDurationSec: try? container.decodeIfPresent(Double.self, forKey: .medianGoalDurationSec),
+            spinReworkPct: (try? container.decode(Double.self, forKey: .spinReworkPct)) ?? 0,
+            sessionsCount: (try? container.decode(Int.self, forKey: .sessionsCount)) ?? 0
+        )
+    }
+}
+
+public struct WorkStatusTrendSummary: Codable, Sendable, Equatable {
+    public let firstPassRatePct: Double?
+    public let firstPassDeltaPct: Double?
+    public let medianGoalDurationSec: Double?
+    public let medianDurationDeltaSec: Double?
+    public let spinReworkPct: Double
+    public let spinReworkDeltaPct: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case firstPassRatePct = "first_pass_rate_pct"
+        case firstPassDeltaPct = "first_pass_delta_pct"
+        case medianGoalDurationSec = "median_goal_duration_sec"
+        case medianDurationDeltaSec = "median_duration_delta_sec"
+        case spinReworkPct = "spin_rework_pct"
+        case spinReworkDeltaPct = "spin_rework_delta_pct"
+    }
+
+    public init(
+        firstPassRatePct: Double? = nil,
+        firstPassDeltaPct: Double? = nil,
+        medianGoalDurationSec: Double? = nil,
+        medianDurationDeltaSec: Double? = nil,
+        spinReworkPct: Double = 0,
+        spinReworkDeltaPct: Double? = nil
+    ) {
+        self.firstPassRatePct = clampOptionalPct(firstPassRatePct)
+        self.firstPassDeltaPct = clampOptionalDeltaPct(firstPassDeltaPct)
+        self.medianGoalDurationSec = clampOptionalDuration(medianGoalDurationSec)
+        self.medianDurationDeltaSec = clampOptionalDuration(medianDurationDeltaSec, allowNegative: true)
+        self.spinReworkPct = clampFiniteDouble(spinReworkPct, min: 0, max: 100)
+        self.spinReworkDeltaPct = clampOptionalDeltaPct(spinReworkDeltaPct)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            firstPassRatePct: try? container.decodeIfPresent(Double.self, forKey: .firstPassRatePct),
+            firstPassDeltaPct: try? container.decodeIfPresent(Double.self, forKey: .firstPassDeltaPct),
+            medianGoalDurationSec: try? container.decodeIfPresent(Double.self, forKey: .medianGoalDurationSec),
+            medianDurationDeltaSec: try? container.decodeIfPresent(Double.self, forKey: .medianDurationDeltaSec),
+            spinReworkPct: (try? container.decode(Double.self, forKey: .spinReworkPct)) ?? 0,
+            spinReworkDeltaPct: try? container.decodeIfPresent(Double.self, forKey: .spinReworkDeltaPct)
+        )
+    }
+}
+
+public struct WorkStatusSkillVersionCohort: Codable, Sendable, Equatable, Identifiable {
+    public let cohortID: String
+    public let skill: String
+    public let previousVersion: String
+    public let currentVersion: String
+    public let watermarkSHA: String?
+    public let beforeGoalsCount: Int
+    public let afterGoalsCount: Int
+    public let beforeFirstPassPct: Double?
+    public let afterFirstPassPct: Double?
+    public let firstPassDeltaPct: Double?
+    public let beforeReworkPct: Double
+    public let afterReworkPct: Double
+    public let reworkDeltaPct: Double
+    public let beforeMedianDurationSec: Double?
+    public let afterMedianDurationSec: Double?
+    public let postFixRecurrenceCount: Int
+    public let beforeGoalIDs: [String]
+    public let afterGoalIDs: [String]
+
+    public var id: String { cohortID }
+
+    enum CodingKeys: String, CodingKey {
+        case cohortID = "cohort_id"
+        case skill
+        case previousVersion = "previous_version"
+        case currentVersion = "current_version"
+        case watermarkSHA = "watermark_sha"
+        case beforeGoalsCount = "before_goals_count"
+        case afterGoalsCount = "after_goals_count"
+        case beforeFirstPassPct = "before_first_pass_pct"
+        case afterFirstPassPct = "after_first_pass_pct"
+        case firstPassDeltaPct = "first_pass_delta_pct"
+        case beforeReworkPct = "before_rework_pct"
+        case afterReworkPct = "after_rework_pct"
+        case reworkDeltaPct = "rework_delta_pct"
+        case beforeMedianDurationSec = "before_median_duration_sec"
+        case afterMedianDurationSec = "after_median_duration_sec"
+        case postFixRecurrenceCount = "post_fix_recurrence_count"
+        case beforeGoalIDs = "before_goal_ids"
+        case afterGoalIDs = "after_goal_ids"
+    }
+
+    public init(
+        cohortID: String? = nil,
+        skill: String,
+        previousVersion: String = "升级前",
+        currentVersion: String = "当前版",
+        watermarkSHA: String? = nil,
+        beforeGoalsCount: Int? = nil,
+        afterGoalsCount: Int? = nil,
+        beforeFirstPassPct: Double? = nil,
+        afterFirstPassPct: Double? = nil,
+        firstPassDeltaPct: Double? = nil,
+        beforeReworkPct: Double = 0,
+        afterReworkPct: Double = 0,
+        reworkDeltaPct: Double? = nil,
+        beforeMedianDurationSec: Double? = nil,
+        afterMedianDurationSec: Double? = nil,
+        postFixRecurrenceCount: Int = 0,
+        beforeGoalIDs: [String] = [],
+        afterGoalIDs: [String] = []
+    ) {
+        self.cohortID = cohortID ?? "\(skill):\(previousVersion)->\(currentVersion)"
+        self.skill = skill
+        self.previousVersion = previousVersion
+        self.currentVersion = currentVersion
+        self.watermarkSHA = watermarkSHA
+        self.beforeGoalsCount = max(0, beforeGoalsCount ?? beforeGoalIDs.count)
+        self.afterGoalsCount = max(0, afterGoalsCount ?? afterGoalIDs.count)
+        let clampedBFP = clampOptionalPct(beforeFirstPassPct)
+        let clampedAFP = clampOptionalPct(afterFirstPassPct)
+        self.beforeFirstPassPct = clampedBFP
+        self.afterFirstPassPct = clampedAFP
+        let fallbackFPDelta = (clampedAFP != nil && clampedBFP != nil) ? ((clampedAFP ?? 0) - (clampedBFP ?? 0)) : nil
+        self.firstPassDeltaPct = clampOptionalDeltaPct(firstPassDeltaPct ?? fallbackFPDelta)
+        let clampedBRW = clampFiniteDouble(beforeReworkPct, min: 0, max: 100)
+        let clampedARW = clampFiniteDouble(afterReworkPct, min: 0, max: 100)
+        self.beforeReworkPct = clampedBRW
+        self.afterReworkPct = clampedARW
+        self.reworkDeltaPct = clampFiniteDouble(reworkDeltaPct ?? (clampedARW - clampedBRW), min: -100, max: 100)
+        self.beforeMedianDurationSec = clampOptionalDuration(beforeMedianDurationSec)
+        self.afterMedianDurationSec = clampOptionalDuration(afterMedianDurationSec)
+        self.postFixRecurrenceCount = max(0, postFixRecurrenceCount)
+        self.beforeGoalIDs = beforeGoalIDs
+        self.afterGoalIDs = afterGoalIDs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let sk = (try? container.decode(String.self, forKey: .skill)) ?? ""
+        let prevV = (try? container.decode(String.self, forKey: .previousVersion)) ?? "升级前"
+        let currV = (try? container.decode(String.self, forKey: .currentVersion)) ?? "当前版"
+        let bIDs = (try? container.decode([String].self, forKey: .beforeGoalIDs)) ?? []
+        let aIDs = (try? container.decode([String].self, forKey: .afterGoalIDs)) ?? []
+        self.init(
+            cohortID: try? container.decodeIfPresent(String.self, forKey: .cohortID),
+            skill: sk,
+            previousVersion: prevV,
+            currentVersion: currV,
+            watermarkSHA: try? container.decodeIfPresent(String.self, forKey: .watermarkSHA),
+            beforeGoalsCount: try? container.decodeIfPresent(Int.self, forKey: .beforeGoalsCount),
+            afterGoalsCount: try? container.decodeIfPresent(Int.self, forKey: .afterGoalsCount),
+            beforeFirstPassPct: try? container.decodeIfPresent(Double.self, forKey: .beforeFirstPassPct),
+            afterFirstPassPct: try? container.decodeIfPresent(Double.self, forKey: .afterFirstPassPct),
+            firstPassDeltaPct: try? container.decodeIfPresent(Double.self, forKey: .firstPassDeltaPct),
+            beforeReworkPct: (try? container.decode(Double.self, forKey: .beforeReworkPct)) ?? 0,
+            afterReworkPct: (try? container.decode(Double.self, forKey: .afterReworkPct)) ?? 0,
+            reworkDeltaPct: try? container.decodeIfPresent(Double.self, forKey: .reworkDeltaPct),
+            beforeMedianDurationSec: try? container.decodeIfPresent(Double.self, forKey: .beforeMedianDurationSec),
+            afterMedianDurationSec: try? container.decodeIfPresent(Double.self, forKey: .afterMedianDurationSec),
+            postFixRecurrenceCount: (try? container.decode(Int.self, forKey: .postFixRecurrenceCount)) ?? 0,
+            beforeGoalIDs: bIDs,
+            afterGoalIDs: aIDs
+        )
+    }
+}
+
+public struct WorkStatusRepoDeliveredGroup: Codable, Sendable, Equatable, Identifiable {
+    public let repo: String
+    public let goalsCount: Int
+    public let prsCount: Int
+    public let firstPassCount: Int
+    public let firstPassRatePct: Double?
+    public let totalDurationSec: Double
+    public let medianDurationSec: Double?
+    public let filesChangedCount: Int
+    public let commitsCount: Int
+    public let goalIDs: [String]
+
+    public var id: String { repo }
+
+    enum CodingKeys: String, CodingKey {
+        case repo
+        case goalsCount = "goals_count"
+        case prsCount = "prs_count"
+        case firstPassCount = "first_pass_count"
+        case firstPassRatePct = "first_pass_rate_pct"
+        case totalDurationSec = "total_duration_sec"
+        case medianDurationSec = "median_duration_sec"
+        case filesChangedCount = "files_changed_count"
+        case commitsCount = "commits_count"
+        case goalIDs = "goal_ids"
+    }
+
+    public init(
+        repo: String,
+        goalsCount: Int? = nil,
+        prsCount: Int = 0,
+        firstPassCount: Int = 0,
+        firstPassRatePct: Double? = nil,
+        totalDurationSec: Double = 0,
+        medianDurationSec: Double? = nil,
+        filesChangedCount: Int = 0,
+        commitsCount: Int = 0,
+        goalIDs: [String] = []
+    ) {
+        self.repo = repo.isEmpty ? "其他仓库" : repo
+        self.goalsCount = max(0, goalsCount ?? goalIDs.count)
+        self.prsCount = max(0, prsCount)
+        self.firstPassCount = max(0, firstPassCount)
+        self.firstPassRatePct = clampOptionalPct(firstPassRatePct)
+        self.totalDurationSec = clampFiniteDouble(totalDurationSec, min: 0, max: 365.0 * 86_400.0)
+        self.medianDurationSec = clampOptionalDuration(medianDurationSec)
+        self.filesChangedCount = max(0, filesChangedCount)
+        self.commitsCount = max(0, commitsCount)
+        self.goalIDs = goalIDs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let ids = (try? container.decode([String].self, forKey: .goalIDs)) ?? []
+        self.init(
+            repo: (try? container.decode(String.self, forKey: .repo)) ?? "其他仓库",
+            goalsCount: try? container.decodeIfPresent(Int.self, forKey: .goalsCount),
+            prsCount: (try? container.decode(Int.self, forKey: .prsCount)) ?? 0,
+            firstPassCount: (try? container.decode(Int.self, forKey: .firstPassCount)) ?? 0,
+            firstPassRatePct: try? container.decodeIfPresent(Double.self, forKey: .firstPassRatePct),
+            totalDurationSec: (try? container.decode(Double.self, forKey: .totalDurationSec)) ?? 0,
+            medianDurationSec: try? container.decodeIfPresent(Double.self, forKey: .medianDurationSec),
+            filesChangedCount: (try? container.decode(Int.self, forKey: .filesChangedCount)) ?? 0,
+            commitsCount: (try? container.decode(Int.self, forKey: .commitsCount)) ?? 0,
+            goalIDs: ids
+        )
+    }
+}
+
+public enum WorkStatusDerivationHelper {
+    private static let roleOrder = ["m3", "m2", "m1", "explorer", "designer", "writer", "reviewer", "pr_monitor"]
+    private static let activeStatuses: Set<String> = ["active", "in_progress", "in_review", "blocked", "planning", "accepting", "ready"]
+    private static let doneStatuses: Set<String> = ["done", "merged", "completed"]
+
+    public static func deriveRoleRelay(from sessions: [WorkStatusSessionReceipt]) -> [WorkStatusRoleRelayItem] {
+        guard !sessions.isEmpty else { return [] }
+        struct RoleBucket {
+            var zh: String
+            var en: String
+            var dur: Double = 0
+            var count: Int = 0
+            var rework: Int = 0
+        }
+        var byRole: [String: RoleBucket] = [:]
+        var totalDur = 0.0
+        for sess in sessions {
+            let rk = sess.roleKey.lowercased()
+            totalDur += sess.durationSec
+            var cur = byRole[rk] ?? RoleBucket(zh: sess.roleLabelZh, en: sess.roleLabelEn)
+            cur.dur += sess.durationSec
+            cur.count += 1
+            cur.rework += sess.actionSplit.spinReworkCalls
+            byRole[rk] = cur
+        }
+        let orderedKeys = byRole.keys.sorted { lhs, rhs in
+            let li = roleOrder.firstIndex(of: lhs) ?? 99
+            let ri = roleOrder.firstIndex(of: rhs) ?? 99
+            return li != ri ? li < ri : lhs < rhs
+        }
+        let totalSess = max(1, sessions.count)
+        var runningPct = 0.0
+        var out: [WorkStatusRoleRelayItem] = []
+        for (idx, rk) in orderedKeys.enumerated() {
+            guard let item = byRole[rk] else { continue }
+            let pct: Double
+            if idx == orderedKeys.count - 1 {
+                pct = max(0, ((100.0 - runningPct) * 10).rounded() / 10)
+            } else if totalDur > 0 {
+                pct = ((100.0 * item.dur / totalDur) * 10).rounded() / 10
+                runningPct += pct
+            } else {
+                pct = ((100.0 * Double(item.count) / Double(totalSess)) * 10).rounded() / 10
+                runningPct += pct
+            }
+            out.append(WorkStatusRoleRelayItem(
+                roleKey: rk,
+                roleLabelZh: item.zh,
+                roleLabelEn: item.en,
+                durationSec: (item.dur * 10).rounded() / 10,
+                sharePct: pct,
+                sessionCount: item.count,
+                reworkCalls: item.rework
+            ))
+        }
+        return out
+    }
+
+    public static func deriveFocusBucket(
+        isUnassigned: Bool,
+        status: String,
+        reviewRoundBadge: String?,
+        actionSplit: WorkStatusActionSplit,
+        aiSignals: [WorkStatusAISignal],
+        skillWatermarks: [WorkStatusGoalSkillWatermark]
+    ) -> (bucket: String, isAnomaly: Bool) {
+        if isUnassigned { return ("unassigned_daily", false) }
+        let norm = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if activeStatuses.contains(norm) || (!doneStatuses.contains(norm) && !["cancelled", "canceled", "daily"].contains(norm)) {
+            return ("active_or_blocked", true)
+        }
+        let hasPostRecurring = skillWatermarks.contains { $0.watermarkState == "post_fix_recurring" }
+        let hasWarning = aiSignals.contains { $0.severity == "warning" }
+        let badge = reviewRoundBadge?.uppercased()
+        if hasPostRecurring || badge == "R2" || badge == "R3+" || actionSplit.spinReworkCalls > 0 || hasWarning {
+            return ("post_fix_collision", true)
+        }
+        return ("steady_delivered", false)
+    }
+
+    public static func medianValue(_ values: [Double]) -> Double? {
+        let sorted = values.filter { $0 > 0 }.sorted()
+        guard !sorted.isEmpty else { return nil }
+        let mid = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (((sorted[mid - 1] + sorted[mid]) / 2.0) * 10).rounded() / 10
+        }
+        return (sorted[mid] * 10).rounded() / 10
+    }
+
+    public static func cleanRepoDisplay(_ raw: String?) -> String {
+        guard let raw else { return "其他仓库" }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "其他仓库" }
+        if let last = trimmed.split(separator: "/").last, !last.isEmpty {
+            return String(last)
+        }
+        return trimmed
+    }
+
+    public static func deriveRepoDeliveredGroups(from goals: [WorkStatusGoalRow]) -> [WorkStatusRepoDeliveredGroup] {
+        var grouped: [String: [WorkStatusGoalRow]] = [:]
+        for goal in goals where goal.focusBucket == "steady_delivered" {
+            let repoName = cleanRepoDisplay(goal.repo)
+            grouped[repoName, default: []].append(goal)
+        }
+        let out = grouped.map { repoName, gList -> WorkStatusRepoDeliveredGroup in
+            let prs = Set(gList.compactMap(\.outputs.prNumber))
+            let evalG = gList.filter { $0.reviewRoundBadge != nil }
+            let fpCnt = evalG.filter(\.isFirstPassReview).count
+            let fpPct = evalG.isEmpty ? nil : ((100.0 * Double(fpCnt) / Double(evalG.count)) * 10).rounded() / 10
+            let totalDur = (gList.reduce(0.0) { $0 + $1.durationSec } * 10).rounded() / 10
+            return WorkStatusRepoDeliveredGroup(
+                repo: repoName,
+                goalsCount: gList.count,
+                prsCount: prs.count,
+                firstPassCount: fpCnt,
+                firstPassRatePct: fpPct,
+                totalDurationSec: totalDur,
+                medianDurationSec: medianValue(gList.map(\.durationSec)),
+                filesChangedCount: gList.reduce(0) { $0 + $1.outputs.filesChangedCount },
+                commitsCount: gList.reduce(0) { $0 + $1.outputs.commitsCount },
+                goalIDs: gList.map(\.goalID)
+            )
+        }
+        return out.sorted {
+            if $0.goalsCount != $1.goalsCount { return $0.goalsCount > $1.goalsCount }
+            if $0.totalDurationSec != $1.totalDurationSec { return $0.totalDurationSec > $1.totalDurationSec }
+            return $0.repo < $1.repo
+        }
+    }
+
+    public static func deriveTimeSeriesAndSummary(from goals: [WorkStatusGoalRow]) -> ([WorkStatusTimeSeriesPoint], WorkStatusTrendSummary) {
+        var dayGoals: [String: [WorkStatusGoalRow]] = [:]
+        var daySessions: [String: (sessions: Int, totalCalls: Int, swCalls: Int)] = [:]
+        let assigned = goals.filter { !$0.isUnassignedBucket }
+
+        for goal in goals {
+            for sess in goal.sessions {
+                let day = sess.cstDay ?? goal.latestActivityAt.map { String($0.prefix(10)) } ?? ""
+                guard !day.isEmpty else { continue }
+                var cur = daySessions[day] ?? (0, 0, 0)
+                cur.sessions += 1
+                cur.totalCalls += sess.actionSplit.totalCalls
+                cur.swCalls += sess.actionSplit.spinReworkCalls
+                daySessions[day] = cur
+            }
+            if !goal.isUnassignedBucket {
+                let gDay = goal.latestActivityAt.map { String($0.prefix(10)) } ?? goal.sessions.compactMap(\.cstDay).max() ?? ""
+                if !gDay.isEmpty {
+                    dayGoals[gDay, default: []].append(goal)
+                    if daySessions[gDay] == nil {
+                        daySessions[gDay] = (goal.outputs.sessionCount, goal.actionSplit.totalCalls, goal.actionSplit.spinReworkCalls)
+                    }
+                }
+            }
+        }
+
+        let allDays = daySessions.keys.sorted()
+        let series: [WorkStatusTimeSeriesPoint] = allDays.map { day in
+            let sb = daySessions[day] ?? (0, 0, 0)
+            let gList = dayGoals[day] ?? []
+            let evalG = gList.filter { $0.reviewRoundBadge != nil }
+            let fpRate = evalG.isEmpty ? nil : ((100.0 * Double(evalG.filter(\.isFirstPassReview).count) / Double(evalG.count)) * 10).rounded() / 10
+            let spinPct = sb.totalCalls > 0 ? ((100.0 * Double(sb.swCalls) / Double(sb.totalCalls)) * 10).rounded() / 10 : 0.0
+            return WorkStatusTimeSeriesPoint(
+                day: day,
+                goalsCompleted: gList.count,
+                firstPassRate: fpRate,
+                medianGoalDurationSec: medianValue(gList.map(\.durationSec)),
+                spinReworkPct: spinPct,
+                sessionsCount: sb.sessions
+            )
+        }
+
+        let evalAll = assigned.filter { $0.reviewRoundBadge != nil }
+        let overallFP = evalAll.isEmpty ? nil : ((100.0 * Double(evalAll.filter(\.isFirstPassReview).count) / Double(evalAll.count)) * 10).rounded() / 10
+        let overallMed = medianValue(assigned.map(\.durationSec))
+        let totCalls = daySessions.values.reduce(0) { $0 + $1.totalCalls }
+        let swCalls = daySessions.values.reduce(0) { $0 + $1.swCalls }
+        let overallSpin = totCalls > 0 ? ((100.0 * Double(swCalls) / Double(totCalls)) * 10).rounded() / 10 : 0.0
+
+        var fpDelta: Double?
+        var durDelta: Double?
+        var spinDelta: Double?
+        if allDays.count >= 2 {
+            let mid = allDays.count / 2
+            let earlyDays = Set(allDays.prefix(mid))
+            let lateDays = Set(allDays.suffix(allDays.count - mid))
+            let earlyG = earlyDays.flatMap { dayGoals[$0] ?? [] }
+            let lateG = lateDays.flatMap { dayGoals[$0] ?? [] }
+            let eEval = earlyG.filter { $0.reviewRoundBadge != nil }
+            let lEval = lateG.filter { $0.reviewRoundBadge != nil }
+            if !eEval.isEmpty && !lEval.isEmpty {
+                let eFP = 100.0 * Double(eEval.filter(\.isFirstPassReview).count) / Double(eEval.count)
+                let lFP = 100.0 * Double(lEval.filter(\.isFirstPassReview).count) / Double(lEval.count)
+                fpDelta = ((lFP - eFP) * 10).rounded() / 10
+            }
+            if let eMed = medianValue(earlyG.map(\.durationSec)), let lMed = medianValue(lateG.map(\.durationSec)) {
+                durDelta = ((lMed - eMed) * 10).rounded() / 10
+            }
+            let eTot = earlyDays.reduce(0) { $0 + (daySessions[$1]?.totalCalls ?? 0) }
+            let eSW = earlyDays.reduce(0) { $0 + (daySessions[$1]?.swCalls ?? 0) }
+            let lTot = lateDays.reduce(0) { $0 + (daySessions[$1]?.totalCalls ?? 0) }
+            let lSW = lateDays.reduce(0) { $0 + (daySessions[$1]?.swCalls ?? 0) }
+            if eTot > 0 && lTot > 0 {
+                spinDelta = (((100.0 * Double(lSW) / Double(lTot)) - (100.0 * Double(eSW) / Double(eTot))) * 10).rounded() / 10
+            }
+        }
+
+        let summary = WorkStatusTrendSummary(
+            firstPassRatePct: overallFP,
+            firstPassDeltaPct: fpDelta,
+            medianGoalDurationSec: overallMed,
+            medianDurationDeltaSec: durDelta,
+            spinReworkPct: overallSpin,
+            spinReworkDeltaPct: spinDelta
+        )
+        return (series, summary)
+    }
+
+    public static func deduplicateGoals(_ goals: [WorkStatusGoalRow]) -> [WorkStatusGoalRow] {
+        var seen: Set<String> = []
+        var unique: [WorkStatusGoalRow] = []
+        for goal in goals where seen.insert(goal.goalID).inserted {
+            unique.append(goal)
+        }
+        return unique
+    }
+
+    public static func deduplicateCohorts(_ cohorts: [WorkStatusSkillVersionCohort]) -> [WorkStatusSkillVersionCohort] {
+        var seen: Set<String> = []
+        var unique: [WorkStatusSkillVersionCohort] = []
+        for cohort in cohorts where !cohort.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill(cohort.skill) {
+            if seen.insert(cohort.cohortID).inserted {
+                unique.append(cohort)
+            }
+        }
+        return unique
+    }
+
+    public static func deduplicateRepoGroups(_ groups: [WorkStatusRepoDeliveredGroup]) -> [WorkStatusRepoDeliveredGroup] {
+        var seen: Set<String> = []
+        var unique: [WorkStatusRepoDeliveredGroup] = []
+        for group in groups where seen.insert(group.repo).inserted {
+            unique.append(group)
+        }
+        return unique
+    }
+}
+
 public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
     public let goalID: String
     public let title: String
@@ -1023,6 +1702,10 @@ public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
     public let turnCount: Int
     public let totalTokens: UInt64
     public let skillsUsed: [WorkStatusGoalSkillTouch]
+    public let skillWatermarks: [WorkStatusGoalSkillWatermark]
+    public let roleRelay: [WorkStatusRoleRelayItem]
+    public let focusBucket: String
+    public let isFocusAnomaly: Bool
     public let actionSplit: WorkStatusActionSplit
     public let outputs: WorkStatusGoalOutputs
     public let aiSignals: [WorkStatusAISignal]
@@ -1042,6 +1725,10 @@ public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
         case turnCount = "turn_count"
         case totalTokens = "total_tokens"
         case skillsUsed = "skills_used"
+        case skillWatermarks = "skill_watermarks"
+        case roleRelay = "role_relay"
+        case focusBucket = "focus_bucket"
+        case isFocusAnomaly = "is_focus_anomaly"
         case actionSplit = "action_split"
         case outputs
         case aiSignals = "ai_signals"
@@ -1060,6 +1747,10 @@ public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
         turnCount: Int = 0,
         totalTokens: UInt64 = 0,
         skillsUsed: [WorkStatusGoalSkillTouch] = [],
+        skillWatermarks: [WorkStatusGoalSkillWatermark] = [],
+        roleRelay: [WorkStatusRoleRelayItem]? = nil,
+        focusBucket: String? = nil,
+        isFocusAnomaly: Bool? = nil,
         actionSplit: WorkStatusActionSplit = WorkStatusActionSplit(),
         outputs: WorkStatusGoalOutputs? = nil,
         aiSignals: [WorkStatusAISignal] = [],
@@ -1072,10 +1763,28 @@ public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
         self.status = status
         self.reviewRoundBadge = reviewRoundBadge
         self.latestActivityAt = latestActivityAt
-        self.durationSec = max(0, durationSec)
+        self.durationSec = clampFiniteDouble(durationSec, min: 0, max: 365.0 * 86_400.0)
         self.turnCount = max(0, turnCount)
         self.totalTokens = totalTokens
         self.skillsUsed = skillsUsed.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        let cleanedWatermarks = skillWatermarks.filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        self.skillWatermarks = cleanedWatermarks
+        if let roleRelay, !roleRelay.isEmpty {
+            self.roleRelay = roleRelay
+        } else {
+            self.roleRelay = WorkStatusDerivationHelper.deriveRoleRelay(from: sessions)
+        }
+        let derivedFocus = WorkStatusDerivationHelper.deriveFocusBucket(
+            isUnassigned: isUnassignedBucket,
+            status: status,
+            reviewRoundBadge: reviewRoundBadge,
+            actionSplit: actionSplit,
+            aiSignals: aiSignals,
+            skillWatermarks: cleanedWatermarks
+        )
+        let resolvedBucket = focusBucket ?? derivedFocus.bucket
+        self.focusBucket = resolvedBucket
+        self.isFocusAnomaly = isFocusAnomaly ?? (resolvedBucket == "active_or_blocked" || resolvedBucket == "post_fix_collision")
         self.actionSplit = actionSplit
         self.outputs = outputs ?? WorkStatusGoalOutputs(sessionCount: sessions.count)
         self.aiSignals = aiSignals
@@ -1089,6 +1798,9 @@ public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
         let decodedSessions = (try? container.decode([WorkStatusSessionReceipt].self, forKey: .sessions)) ?? []
         let decodedSkills = ((try? container.decode([WorkStatusGoalSkillTouch].self, forKey: .skillsUsed)) ?? [])
             .filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        let decodedWatermarks = ((try? container.decode([WorkStatusGoalSkillWatermark].self, forKey: .skillWatermarks)) ?? [])
+            .filter { !$0.skill.isEmpty && !SkillsPseudoSkillGuard.isPseudoSkill($0.skill) }
+        let decodedRelay = try? container.decodeIfPresent([WorkStatusRoleRelayItem].self, forKey: .roleRelay)
         self.init(
             goalID: gid,
             title: (try? container.decode(String.self, forKey: .title)) ?? gid,
@@ -1101,6 +1813,10 @@ public struct WorkStatusGoalRow: Codable, Sendable, Equatable, Identifiable {
             turnCount: (try? container.decode(Int.self, forKey: .turnCount)) ?? 0,
             totalTokens: (try? container.decode(UInt64.self, forKey: .totalTokens)) ?? 0,
             skillsUsed: decodedSkills,
+            skillWatermarks: decodedWatermarks,
+            roleRelay: decodedRelay,
+            focusBucket: try? container.decodeIfPresent(String.self, forKey: .focusBucket),
+            isFocusAnomaly: try? container.decodeIfPresent(Bool.self, forKey: .isFocusAnomaly),
             actionSplit: (try? container.decode(WorkStatusActionSplit.self, forKey: .actionSplit)) ?? WorkStatusActionSplit(),
             outputs: (try? container.decode(WorkStatusGoalOutputs.self, forKey: .outputs))
                 ?? WorkStatusGoalOutputs(sessionCount: decodedSessions.count),
@@ -1121,6 +1837,10 @@ public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
     public let sampleSize: Int
     public let coverageStatus: String
     public let pulse: WorkStatusPulseSummary
+    public let trendSummary: WorkStatusTrendSummary
+    public let timeSeries: [WorkStatusTimeSeriesPoint]
+    public let skillVersionCohorts: [WorkStatusSkillVersionCohort]
+    public let repoDeliveredGroups: [WorkStatusRepoDeliveredGroup]
     public let goals: [WorkStatusGoalRow]
     public let errors: [String]
 
@@ -1135,6 +1855,10 @@ public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
         case sampleSize = "sample_size"
         case coverageStatus = "coverage_status"
         case pulse
+        case trendSummary = "trend_summary"
+        case timeSeries = "time_series"
+        case skillVersionCohorts = "skill_version_cohorts"
+        case repoDeliveredGroups = "repo_delivered_groups"
         case goals
         case errors
     }
@@ -1150,6 +1874,10 @@ public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
         sampleSize: Int = 0,
         coverageStatus: String = "unknown",
         pulse: WorkStatusPulseSummary = WorkStatusPulseSummary(),
+        trendSummary: WorkStatusTrendSummary? = nil,
+        timeSeries: [WorkStatusTimeSeriesPoint]? = nil,
+        skillVersionCohorts: [WorkStatusSkillVersionCohort] = [],
+        repoDeliveredGroups: [WorkStatusRepoDeliveredGroup]? = nil,
         goals: [WorkStatusGoalRow] = [],
         errors: [String] = []
     ) {
@@ -1163,15 +1891,26 @@ public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
         self.sampleSize = max(0, sampleSize)
         self.coverageStatus = coverageStatus
         self.pulse = pulse
-        self.goals = goals
+        let uniqueGoals = WorkStatusDerivationHelper.deduplicateGoals(goals)
+        let derivedTrend = WorkStatusDerivationHelper.deriveTimeSeriesAndSummary(from: uniqueGoals)
+        self.timeSeries = timeSeries ?? derivedTrend.0
+        self.trendSummary = trendSummary ?? derivedTrend.1
+        self.skillVersionCohorts = WorkStatusDerivationHelper.deduplicateCohorts(skillVersionCohorts)
+        self.repoDeliveredGroups = WorkStatusDerivationHelper.deduplicateRepoGroups(
+            repoDeliveredGroups ?? WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: uniqueGoals)
+        )
+        self.goals = uniqueGoals
         self.errors = errors
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let decodedGoals = (try? container.decode([WorkStatusGoalRow].self, forKey: .goals)) ?? []
+        let decodedGoals = WorkStatusDerivationHelper.deduplicateGoals(
+            (try? container.decode([WorkStatusGoalRow].self, forKey: .goals)) ?? []
+        )
         let decodedPulse = (try? container.decode(WorkStatusPulseSummary.self, forKey: .pulse))
             ?? WorkStatusPulseSummary()
+        let derivedTrend = WorkStatusDerivationHelper.deriveTimeSeriesAndSummary(from: decodedGoals)
         self.contract = (try? container.decode(String.self, forKey: .contract)) ?? "aidash-work-status/v1"
         self.schemaVersion = (try? container.decode(Int.self, forKey: .schemaVersion)) ?? 1
         self.generatedAt = try? container.decodeIfPresent(String.self, forKey: .generatedAt)
@@ -1185,6 +1924,17 @@ public struct WorkStatusWorkbenchSnapshot: Codable, Sendable, Equatable {
         )
         self.coverageStatus = (try? container.decode(String.self, forKey: .coverageStatus)) ?? "unknown"
         self.pulse = decodedPulse
+        self.timeSeries = (try? container.decodeIfPresent([WorkStatusTimeSeriesPoint].self, forKey: .timeSeries))
+            ?? derivedTrend.0
+        self.trendSummary = (try? container.decodeIfPresent(WorkStatusTrendSummary.self, forKey: .trendSummary))
+            ?? derivedTrend.1
+        self.skillVersionCohorts = WorkStatusDerivationHelper.deduplicateCohorts(
+            (try? container.decode([WorkStatusSkillVersionCohort].self, forKey: .skillVersionCohorts)) ?? []
+        )
+        self.repoDeliveredGroups = WorkStatusDerivationHelper.deduplicateRepoGroups(
+            (try? container.decodeIfPresent([WorkStatusRepoDeliveredGroup].self, forKey: .repoDeliveredGroups))
+                ?? WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: decodedGoals)
+        )
         self.goals = decodedGoals
         self.errors = (try? container.decode([String].self, forKey: .errors)) ?? []
     }
@@ -1219,7 +1969,7 @@ public enum LiveDashboardTelemetryReaderSanitizer {
         for (bad, good) in pairs {
             cleaned = cleaned.replacingOccurrences(of: bad, with: good, options: [.caseInsensitive])
         }
-        let codePattern = #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
+        let codePattern = #"\b(?:S(?:[1-9]|1[0-2])|M[1-5]|E[1-9]|L[0-3]|R[1-4](?:_[A-Za-z0-9_]+)?|H[1-5](?:_[A-Za-z0-9_]+)?|HZN[1-5](?:_[A-Za-z0-9_]+)?)(?!-[A-Za-z0-9])\b"#
         if let regex = try? NSRegularExpression(pattern: codePattern) {
             let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
             cleaned = regex.stringByReplacingMatches(in: cleaned, range: range, withTemplate: "阶段")

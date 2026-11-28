@@ -58,8 +58,15 @@ public struct SessionReceiptPresentation: Identifiable, Equatable, Sendable {
 }
 
 public enum WorkStatusFormatter {
+    public static func safeRoundedPercent(_ value: Double, min lower: Int = 0, max upper: Int = 100) -> Int {
+        guard value.isFinite else { return lower }
+        let clamped = Swift.min(Swift.max(value, Double(lower)), Double(upper))
+        return Int(clamped.rounded())
+    }
+
     public static func durationText(_ seconds: Double) -> String {
-        let clamped = max(0, seconds)
+        guard seconds.isFinite else { return "0s" }
+        let clamped = Swift.min(Swift.max(0, seconds), 365.0 * 86_400.0)
         if clamped < 60 {
             return String(format: "%.0fs", clamped)
         }
@@ -266,13 +273,629 @@ public struct WorkStatusActionSplitBar: View {
     }
 }
 
+public enum GoalConvergenceHeaderVariant: String, CaseIterable, Sendable {
+    case dualTrackDeck
+    case compactCohortRibbon
+}
+
+public enum GoalStreamHierarchyVariant: String, CaseIterable, Sendable {
+    case focusTopWithRepoAccordion
+    case beforeAfterVersionSplit
+}
+
+public enum GoalExpandedDiagnosticVariant: String, CaseIterable, Sendable {
+    case watermarkPillsPlusRoleRelayBar
+    case timelineStepRelayList
+}
+
+@MainActor
+public struct WorkStreamTrendMiniSparkline: View {
+    public let values: [Double]
+    public let tint: Color
+    public let height: CGFloat
+    private let theme = Theme.system
+
+    public init(values: [Double], tint: Color, height: CGFloat = 22) {
+        self.values = values
+        self.tint = tint
+        self.height = height
+    }
+
+    public var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            guard values.count >= 2, size.width > 4, size.height > 4 else {
+                let midY = rect.midY
+                var baseLine = Path()
+                baseLine.move(to: CGPoint(x: 2, y: midY))
+                baseLine.addLine(to: CGPoint(x: max(2, size.width - 2), y: midY))
+                context.stroke(
+                    baseLine,
+                    with: .color(theme.neutrals.border.opacity(0.45)),
+                    style: StrokeStyle(lineWidth: 1.2, dash: [3, 2])
+                )
+                if let single = values.first {
+                    let dot = Path(ellipseIn: CGRect(x: size.width / 2 - 2.5, y: midY - 2.5, width: 5, height: 5))
+                    context.fill(dot, with: .color(single >= 0 ? tint : theme.neutrals.text2))
+                }
+                return
+            }
+            let minV = values.min() ?? 0
+            let maxV = values.max() ?? 1
+            let span = max(0.0001, maxV - minV)
+            let padX: CGFloat = 3
+            let padY: CGFloat = 3
+            let usableW = max(1, size.width - padX * 2)
+            let usableH = max(1, size.height - padY * 2)
+
+            var linePath = Path()
+            var areaPath = Path()
+            var lastPt = CGPoint.zero
+            for (idx, val) in values.enumerated() {
+                let x = padX + usableW * CGFloat(idx) / CGFloat(max(1, values.count - 1))
+                let norm = maxV == minV ? 0.5 : CGFloat((val - minV) / span)
+                let y = padY + usableH * (1.0 - norm)
+                let pt = CGPoint(x: x, y: y)
+                if idx == 0 {
+                    linePath.move(to: pt)
+                    areaPath.move(to: CGPoint(x: pt.x, y: size.height - 1))
+                    areaPath.addLine(to: pt)
+                } else {
+                    linePath.addLine(to: pt)
+                    areaPath.addLine(to: pt)
+                }
+                lastPt = pt
+            }
+            areaPath.addLine(to: CGPoint(x: lastPt.x, y: size.height - 1))
+            areaPath.closeSubpath()
+
+            context.fill(areaPath, with: .color(tint.opacity(0.12)))
+            context.stroke(linePath, with: .color(tint), style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+            context.fill(Path(ellipseIn: CGRect(x: lastPt.x - 2.5, y: lastPt.y - 2.5, width: 5, height: 5)), with: .color(tint))
+        }
+        .frame(height: height)
+        .accessibilityHidden(true)
+    }
+}
+
+@MainActor
+public struct RoleRelayDurationBar: View {
+    public let items: [WorkStatusRoleRelayItem]
+    public let locale: Locale
+    public let height: CGFloat
+    private let theme = Theme.system
+
+    public init(items: [WorkStatusRoleRelayItem], locale: Locale = .current, height: CGFloat = 8) {
+        self.items = items
+        self.locale = locale
+        self.height = height
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Canvas { context, size in
+                let rect = CGRect(origin: .zero, size: size)
+                let capsule = Capsule().path(in: rect)
+                context.fill(capsule, with: .color(theme.neutrals.inner))
+                let nonEmpty = items.filter { $0.sharePct > 0 || $0.durationSec > 0 }
+                let totalPct = nonEmpty.reduce(0.0) { $0 + max(0.1, $1.sharePct) }
+                guard !nonEmpty.isEmpty, totalPct > 0, size.width > 0 else { return }
+
+                var clipCtx = context
+                clipCtx.clip(to: capsule)
+                let gap: CGFloat = 1.5
+                let usableW = max(0, size.width - gap * CGFloat(max(0, nonEmpty.count - 1)))
+                var curX: CGFloat = 0
+                for (idx, item) in nonEmpty.enumerated() {
+                    let ratio = CGFloat(max(0.1, item.sharePct) / totalPct)
+                    let segW = idx == nonEmpty.count - 1
+                        ? max(0, size.width - curX)
+                        : min(max(4, usableW * ratio), max(0, size.width - curX))
+                    let segRect = CGRect(x: curX, y: 0, width: segW, height: size.height)
+                    clipCtx.fill(Path(segRect), with: .color(roleColor(for: item.roleKey, hasRework: item.reworkCalls > 0)))
+                    curX += segW + gap
+                }
+            }
+            .frame(height: height)
+            .accessibilityHidden(true)
+
+            HStack(spacing: 6) {
+                ForEach(items.prefix(6)) { item in
+                    let roleText = WorkStatusFormatter.plainRoleBadge(
+                        roleKey: item.roleKey,
+                        zh: item.roleLabelZh,
+                        en: item.roleLabelEn,
+                        locale: locale
+                    )
+                    let tint = roleColor(for: item.roleKey, hasRework: item.reworkCalls > 0)
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(tint)
+                            .frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
+                        Text("\(roleText) \(WorkStatusFormatter.durationText(item.durationSec)) (\(WorkStatusFormatter.safeRoundedPercent(item.sharePct))%)")
+                            .font(.caption2.monospacedDigit().weight(.medium))
+                            .foregroundStyle(item.reworkCalls > 0 ? theme.warningOnSubtle : theme.text(.body))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        (item.reworkCalls > 0 ? theme.warning.opacity(0.14) : theme.neutrals.inner),
+                        in: Capsule()
+                    )
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func roleColor(for key: String, hasRework: Bool) -> Color {
+        if hasRework { return theme.warning }
+        switch key.lowercased() {
+        case "m3", "m2": return theme.chartCategorical(2)
+        case "m1": return theme.primary.primary
+        case "explorer": return theme.chartCategorical(0)
+        case "designer": return theme.chartCategorical(3)
+        case "writer": return theme.success
+        case "reviewer": return theme.chartCategorical(1)
+        default: return theme.primary.primary
+        }
+    }
+}
+
+@MainActor
+public struct WorkStreamConvergenceTrendStrip: View {
+    public let trendSummary: WorkStatusTrendSummary
+    public let timeSeries: [WorkStatusTimeSeriesPoint]
+    public let pulse: WorkStatusPulseSummary
+    public let variant: GoalConvergenceHeaderVariant
+    private let theme = Theme.system
+
+    public init(
+        trendSummary: WorkStatusTrendSummary,
+        timeSeries: [WorkStatusTimeSeriesPoint],
+        pulse: WorkStatusPulseSummary,
+        variant: GoalConvergenceHeaderVariant = .dualTrackDeck
+    ) {
+        self.trendSummary = trendSummary
+        self.timeSeries = timeSeries
+        self.pulse = pulse
+        self.variant = variant
+    }
+
+    public var body: some View {
+        let fpSeries = timeSeries.compactMap(\.firstPassRate)
+        let durSeries = timeSeries.compactMap(\.medianGoalDurationSec).map { $0 / 60.0 }
+        let spinSeries = timeSeries.map(\.spinReworkPct)
+
+        let fpValue = trendSummary.firstPassRatePct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
+        let fpDelta = trendSummary.firstPassDeltaPct.map { val -> String in
+            let sign = val >= 0 ? "▲ +" : "▼ "
+            return String(format: "%@%.0f%%", sign, val)
+        }
+        let fpTone: GoalBadgeTone = {
+            guard let d = trendSummary.firstPassDeltaPct else {
+                return trendSummary.firstPassRatePct != nil ? .success : .neutral
+            }
+            return d >= 0 ? .success : .warning
+        }()
+
+        let durValue = trendSummary.medianGoalDurationSec.map { WorkStatusFormatter.durationText($0) } ?? "—"
+        let durDelta = trendSummary.medianDurationDeltaSec.map { val -> String in
+            let mins = val / 60.0
+            let sign = mins <= 0 ? "▼ " : "▲ +"
+            return String(format: "%@%.0fm", sign, mins)
+        }
+        let durTone: GoalBadgeTone = {
+            guard let d = trendSummary.medianDurationDeltaSec else { return .primary }
+            return d <= 0 ? .success : .warning
+        }()
+
+        let spinValue = String(format: "%.1f%%", trendSummary.spinReworkPct)
+        let spinDelta = trendSummary.spinReworkDeltaPct.map { val -> String in
+            let sign = val <= 0 ? "▼ " : "▲ +"
+            return String(format: "%@%.1f%%", sign, val)
+        }
+        let spinTone: GoalBadgeTone = (trendSummary.spinReworkDeltaPct ?? 0) <= 0 && trendSummary.spinReworkPct <= 8.0
+            ? .success
+            : .warning
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.primary.primary)
+                    .accessibilityHidden(true)
+                Text(DashboardL10n.tr("dashboard.work_status.trend_strip_title", "随时间收敛趋势"))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 6)
+                Text(DashboardL10n.format(
+                    "dashboard.work_status.trend_strip_meta",
+                    "%lld Goal · %lld PR · %lld 会话",
+                    pulse.goalsCount,
+                    pulse.prsTouchedCount,
+                    pulse.sessionsCount
+                ))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            if variant == .dualTrackDeck {
+                HStack(alignment: .top, spacing: 8) {
+                    trendMetricCard(
+                        id: "work-trend-first-pass",
+                        title: DashboardL10n.tr("dashboard.work_status.metric_first_pass", "一次过审率"),
+                        valueText: fpValue,
+                        deltaText: fpDelta,
+                        series: fpSeries,
+                        tone: fpTone
+                    )
+                    trendMetricCard(
+                        id: "work-trend-median-duration",
+                        title: DashboardL10n.tr("dashboard.work_status.metric_median_duration", "单 Goal 中位耗时"),
+                        valueText: durValue,
+                        deltaText: durDelta,
+                        series: durSeries,
+                        tone: durTone
+                    )
+                    trendMetricCard(
+                        id: "work-trend-spin-rework",
+                        title: DashboardL10n.tr("dashboard.work_status.metric_spin_rework", "重试空转占比"),
+                        valueText: spinValue,
+                        deltaText: spinDelta,
+                        series: spinSeries,
+                        tone: spinTone
+                    )
+                }
+            } else {
+                HStack(spacing: 10) {
+                    compactRibbonItem(
+                        title: DashboardL10n.tr("dashboard.work_status.metric_first_pass", "一次过审率"),
+                        valueText: fpValue,
+                        deltaText: fpDelta,
+                        tone: fpTone
+                    )
+                    Divider().frame(height: 22)
+                    compactRibbonItem(
+                        title: DashboardL10n.tr("dashboard.work_status.metric_median_duration", "单 Goal 中位耗时"),
+                        valueText: durValue,
+                        deltaText: durDelta,
+                        tone: durTone
+                    )
+                    Divider().frame(height: 22)
+                    compactRibbonItem(
+                        title: DashboardL10n.tr("dashboard.work_status.metric_spin_rework", "重试空转占比"),
+                        valueText: spinValue,
+                        deltaText: spinDelta,
+                        tone: spinTone
+                    )
+                    Spacer(minLength: 6)
+                    WorkStreamTrendMiniSparkline(values: spinSeries.isEmpty ? fpSeries : spinSeries, tint: theme.success, height: 22)
+                        .frame(width: 96)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(theme.neutrals.inner, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(theme.neutrals.border.opacity(0.14), lineWidth: 1)
+        )
+        .captureDashboardGeometry(id: "work-convergence-trend-strip", role: "trendStrip")
+    }
+
+    private func trendMetricCard(
+        id: String,
+        title: String,
+        valueText: String,
+        deltaText: String?,
+        series: [Double],
+        tone: GoalBadgeTone
+    ) -> some View {
+        let fg = fgTone(tone)
+        let sparkTint = sparkColor(tone)
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(valueText)
+                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(fg)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                if let deltaText {
+                    Text(deltaText)
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(bgTone(tone), in: Capsule())
+                        .foregroundStyle(fg)
+                        .lineLimit(1)
+                }
+            }
+            WorkStreamTrendMiniSparkline(values: series, tint: sparkTint, height: 20)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.neutrals.inner.opacity(0.75), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .captureDashboardGeometry(id: id, role: "trendMetric")
+        .accessibilityElement(children: .combine)
+    }
+
+    private func compactRibbonItem(title: String, valueText: String, deltaText: String?, tone: GoalBadgeTone) -> some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(valueText)
+                .font(.caption.weight(.bold).monospacedDigit())
+                .foregroundStyle(fgTone(tone))
+            if let deltaText {
+                Text(deltaText)
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(fgTone(tone))
+            }
+        }
+    }
+
+    private func fgTone(_ tone: GoalBadgeTone) -> Color {
+        switch tone {
+        case .success: return theme.successOnSubtle
+        case .warning: return theme.warningOnSubtle
+        case .danger: return theme.dangerOnSubtle
+        case .primary: return theme.primary.primaryText
+        case .neutral: return theme.text(.meta)
+        }
+    }
+
+    private func bgTone(_ tone: GoalBadgeTone) -> Color {
+        switch tone {
+        case .success: return theme.success.opacity(0.15)
+        case .warning: return theme.warning.opacity(0.15)
+        case .danger: return theme.danger.opacity(0.15)
+        case .primary: return theme.primary.primary.opacity(0.14)
+        case .neutral: return theme.neutrals.inner
+        }
+    }
+
+    private func sparkColor(_ tone: GoalBadgeTone) -> Color {
+        switch tone {
+        case .success: return theme.success
+        case .warning: return theme.warning
+        case .danger: return theme.danger
+        case .primary: return theme.primary.primary
+        case .neutral: return theme.neutrals.text2
+        }
+    }
+}
+
+@MainActor
+public struct SkillVersionCohortComparisonStrip: View {
+    public let cohorts: [WorkStatusSkillVersionCohort]
+    @Binding public var selectedCohortID: String?
+    public let variant: GoalConvergenceHeaderVariant
+    private let theme = Theme.system
+
+    public init(
+        cohorts: [WorkStatusSkillVersionCohort],
+        selectedCohortID: Binding<String?>,
+        variant: GoalConvergenceHeaderVariant = .dualTrackDeck
+    ) {
+        self.cohorts = cohorts
+        self._selectedCohortID = selectedCohortID
+        self.variant = variant
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.primary.primary)
+                    .accessibilityHidden(true)
+                Text(DashboardL10n.tr("dashboard.work_status.cohort_strip_title", "按技能版本前后对比"))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 6)
+                if selectedCohortID != nil {
+                    Button {
+                        selectedCohortID = nil
+                    } label: {
+                        Text(DashboardL10n.tr("dashboard.work_status.cohort_clear_focus", "退出版本对照"))
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .frame(minHeight: 28)
+                } else {
+                    Text(DashboardL10n.tr("dashboard.work_status.cohort_click_hint", "点击版本锚点聚焦前后 Goal"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if cohorts.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.shield")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(DashboardL10n.tr(
+                        "dashboard.work_status.cohort_empty",
+                        "当前窗口暂无跨版本水位对照样本，待技能升级并关联新旧 Goal 后自动呈现。"
+                    ))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(theme.neutrals.inner.opacity(0.65), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else if variant == .dualTrackDeck {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(cohorts.prefix(2)) { cohort in
+                        cohortDeckButton(cohort)
+                    }
+                }
+            } else {
+                HStack(spacing: 6) {
+                    ForEach(cohorts.prefix(3)) { cohort in
+                        cohortRibbonPillButton(cohort)
+                    }
+                }
+            }
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(theme.neutrals.border.opacity(0.14), lineWidth: 1)
+        )
+        .captureDashboardGeometry(id: "work-skill-cohort-strip", role: "cohortStrip")
+    }
+
+    private func cohortDeckButton(_ cohort: WorkStatusSkillVersionCohort) -> some View {
+        let isSelected = selectedCohortID == cohort.cohortID
+        let hasRecurrence = cohort.postFixRecurrenceCount > 0
+        let fpCompare: String = {
+            let bText = cohort.beforeFirstPassPct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
+            let aText = cohort.afterFirstPassPct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))%" } ?? "—"
+            return "过审 \(bText)→\(aText)"
+        }()
+        let rwDeltaText: String = {
+            let sign = cohort.reworkDeltaPct <= 0 ? "▼ " : "▲ +"
+            return String(format: "空转 %@%.0f%%", sign, cohort.reworkDeltaPct)
+        }()
+
+        return Button {
+            selectedCohortID = isSelected ? nil : cohort.cohortID
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(cohort.skill)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("\(cohort.previousVersion) → \(cohort.currentVersion)")
+                        .font(.caption2.monospaced().weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(theme.primary.primary.opacity(0.15), in: Capsule())
+                        .foregroundStyle(theme.primary.onPrimarySubtle)
+                        .lineLimit(1)
+                }
+                HStack(spacing: 6) {
+                    Text(fpCompare)
+                        .font(.caption2.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text(rwDeltaText)
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(cohort.reworkDeltaPct <= 0 ? theme.successOnSubtle : theme.warningOnSubtle)
+                }
+                HStack(spacing: 6) {
+                    Text(DashboardL10n.format(
+                        "dashboard.work_status.cohort_sample_counts",
+                        "前 %lld · 后 %lld Goal",
+                        cohort.beforeGoalsCount,
+                        cohort.afterGoalsCount
+                    ))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Text(
+                        hasRecurrence
+                            ? DashboardL10n.format("dashboard.work_status.cohort_recurrence_cnt", "复发 %lld", cohort.postFixRecurrenceCount)
+                            : DashboardL10n.tr("dashboard.work_status.cohort_clean", "新版零复发")
+                    )
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background((hasRecurrence ? theme.warning : theme.success).opacity(0.15), in: Capsule())
+                    .foregroundStyle(hasRecurrence ? theme.warningOnSubtle : theme.successOnSubtle)
+                }
+            }
+            .padding(9)
+            .frame(minWidth: 215, alignment: .leading)
+            .background(
+                isSelected ? theme.primary.primary.opacity(0.13) : theme.neutrals.inner.opacity(0.75),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? theme.primary.primary : theme.neutrals.border.opacity(0.2),
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: 28)
+        .captureDashboardGeometry(id: "cohort-anchor-\(cohort.cohortID)", role: "cohortAnchor")
+    }
+
+    private func cohortRibbonPillButton(_ cohort: WorkStatusSkillVersionCohort) -> some View {
+        let isSelected = selectedCohortID == cohort.cohortID
+        let hasRecurrence = cohort.postFixRecurrenceCount > 0
+        return Button {
+            selectedCohortID = isSelected ? nil : cohort.cohortID
+        } label: {
+            HStack(spacing: 5) {
+                Text("\(cohort.skill) \(cohort.previousVersion)→\(cohort.currentVersion)")
+                    .font(.caption2.weight(.semibold))
+                if let delta = cohort.firstPassDeltaPct {
+                    Text(String(format: "%@%.0f%%", delta >= 0 ? "▲+" : "▼", delta))
+                        .font(.caption2.monospacedDigit().weight(.bold))
+                        .foregroundStyle(delta >= 0 ? theme.successOnSubtle : theme.warningOnSubtle)
+                }
+                if hasRecurrence {
+                    Text("复发\(cohort.postFixRecurrenceCount)")
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(theme.warningOnSubtle)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .frame(minHeight: 28)
+            .background(
+                isSelected ? theme.primary.primary.opacity(0.16) : theme.neutrals.inner,
+                in: Capsule()
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(isSelected ? theme.primary.primary : theme.neutrals.border.opacity(0.3), lineWidth: 1)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 @MainActor
 public struct GoalWorkStreamWorkbenchView: View {
     public let summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?
     public let isLoading: Bool
+    public let headerVariant: GoalConvergenceHeaderVariant
+    public let hierarchyVariant: GoalStreamHierarchyVariant
+    public let diagnosticVariant: GoalExpandedDiagnosticVariant
     public let onRefresh: (() -> Void)?
     @State private var selectedFilter: GoalWorkStreamFilter = .all
+    @State private var selectedCohortID: String?
     @State private var expandedGoalIDs: Set<String>
+    @State private var expandedRepos: Set<String>
+    @State private var isUnassignedExpanded: Bool
     @State private var activeReceipt: SessionReceiptPresentation?
     private let theme = Theme.system
     @Environment(\.locale) private var locale
@@ -282,19 +905,30 @@ public struct GoalWorkStreamWorkbenchView: View {
         summary: LiveDashboardTelemetryReader.LiveEfficiencySummary?,
         isLoading: Bool = false,
         initialFilter: GoalWorkStreamFilter = .all,
+        initialSelectedCohortID: String? = nil,
         initialExpandedGoalIDs: Set<String>? = nil,
+        initialExpandedRepos: Set<String> = [],
+        initialUnassignedExpanded: Bool = false,
+        headerVariant: GoalConvergenceHeaderVariant = .dualTrackDeck,
+        hierarchyVariant: GoalStreamHierarchyVariant = .focusTopWithRepoAccordion,
+        diagnosticVariant: GoalExpandedDiagnosticVariant = .watermarkPillsPlusRoleRelayBar,
         initialSelectedReceipt: SessionReceiptPresentation? = nil,
         onRefresh: (() -> Void)? = nil
     ) {
         self.summary = summary
         self.isLoading = isLoading
+        self.headerVariant = headerVariant
+        self.hierarchyVariant = hierarchyVariant
+        self.diagnosticVariant = diagnosticVariant
         self.onRefresh = onRefresh
         _selectedFilter = State(initialValue: initialFilter)
+        _selectedCohortID = State(initialValue: initialSelectedCohortID)
+        _expandedRepos = State(initialValue: initialExpandedRepos)
+        _isUnassignedExpanded = State(initialValue: initialUnassignedExpanded)
         if let initialExpandedGoalIDs {
             _expandedGoalIDs = State(initialValue: initialExpandedGoalIDs)
-        } else if let firstAssigned = summary?.workStatus?.goals.first(where: { !$0.isUnassignedBucket })?.goalID
-            ?? summary?.workStatus?.goals.first?.goalID {
-            _expandedGoalIDs = State(initialValue: [firstAssigned])
+        } else if let firstFocusAnomaly = summary?.workStatus?.goals.first(where: { $0.isFocusAnomaly })?.goalID {
+            _expandedGoalIDs = State(initialValue: [firstFocusAnomaly])
         } else {
             _expandedGoalIDs = State(initialValue: [])
         }
@@ -414,43 +1048,509 @@ public struct GoalWorkStreamWorkbenchView: View {
 
     private func populatedContent(_ snap: WorkStatusWorkbenchSnapshot) -> some View {
         let filteredGoals = snap.goals.filter { selectedFilter.matches($0) }
+        let activeCohort = selectedCohortID.flatMap { cid in
+            snap.skillVersionCohorts.first(where: { $0.cohortID == cid })
+        }
         return VStack(alignment: .leading, spacing: 12) {
             if isLoading || snap.coverageStatus == "partial" {
                 partialOrLoadingStrip(snap)
             }
-            kpiPillsBand(snap)
-            filterAndLegendBar(snap: snap, visibleCount: filteredGoals.count)
-            if filteredGoals.isEmpty {
+            topDualTrackConvergenceHeader(snap)
+            filterAndLegendBar(snap: snap, visibleCount: filteredGoals.filter { !$0.isUnassignedBucket }.count)
+            if let activeCohort {
+                cohortComparisonFocusMatrix(cohort: activeCohort, allGoals: filteredGoals)
+            } else if hierarchyVariant == .beforeAfterVersionSplit, let defaultCohort = snap.skillVersionCohorts.first {
+                cohortComparisonFocusMatrix(cohort: defaultCohort, allGoals: filteredGoals)
+            } else if filteredGoals.isEmpty {
                 scopedEmptyFilterBanner
-            } else if snap.goals.count > 8 {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    goalExpandableRows(filteredGoals)
-                }
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    goalExpandableRows(filteredGoals)
-                }
+                threeTierDeflattenedStream(snap: snap, filteredGoals: filteredGoals)
             }
         }
     }
 
     @ViewBuilder
-    private func goalExpandableRows(_ filteredGoals: [WorkStatusGoalRow]) -> some View {
-        ForEach(Array(filteredGoals.prefix(24))) { goal in
-            GoalWorkStreamExpandableRow(
-                goal: goal,
-                isExpanded: expandedGoalIDs.contains(goal.goalID),
-                locale: locale,
-                reduceMotion: reduceMotion,
-                onToggleExpand: { toggleGoal(goal.goalID) },
-                onOpenSessionReceipt: { session in
-                    activeReceipt = SessionReceiptPresentation(
-                        goalTitle: goal.title,
-                        goalRepo: goal.repo,
-                        session: session
+    private func topDualTrackConvergenceHeader(_ snap: WorkStatusWorkbenchSnapshot) -> some View {
+        if headerVariant == .dualTrackDeck {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 10) {
+                    WorkStreamConvergenceTrendStrip(
+                        trendSummary: snap.trendSummary,
+                        timeSeries: snap.timeSeries,
+                        pulse: snap.pulse,
+                        variant: .dualTrackDeck
+                    )
+                    SkillVersionCohortComparisonStrip(
+                        cohorts: snap.skillVersionCohorts,
+                        selectedCohortID: $selectedCohortID,
+                        variant: .dualTrackDeck
                     )
                 }
-            )
+                .frame(minWidth: 820)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    WorkStreamConvergenceTrendStrip(
+                        trendSummary: snap.trendSummary,
+                        timeSeries: snap.timeSeries,
+                        pulse: snap.pulse,
+                        variant: .dualTrackDeck
+                    )
+                    SkillVersionCohortComparisonStrip(
+                        cohorts: snap.skillVersionCohorts,
+                        selectedCohortID: $selectedCohortID,
+                        variant: .dualTrackDeck
+                    )
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                WorkStreamConvergenceTrendStrip(
+                    trendSummary: snap.trendSummary,
+                    timeSeries: snap.timeSeries,
+                    pulse: snap.pulse,
+                    variant: .compactCohortRibbon
+                )
+                SkillVersionCohortComparisonStrip(
+                    cohorts: snap.skillVersionCohorts,
+                    selectedCohortID: $selectedCohortID,
+                    variant: .compactCohortRibbon
+                )
+            }
+        }
+    }
+
+    private func cohortComparisonFocusMatrix(cohort: WorkStatusSkillVersionCohort, allGoals: [WorkStatusGoalRow]) -> some View {
+        let goalByID = Dictionary(allGoals.map { ($0.goalID, $0) }, uniquingKeysWith: { first, _ in first })
+        let beforeGoals = cohort.beforeGoalIDs.compactMap { goalByID[$0] }
+        let afterGoals = cohort.afterGoalIDs.compactMap { goalByID[$0] }
+        let bReworkInt = WorkStatusFormatter.safeRoundedPercent(cohort.beforeReworkPct)
+        let aReworkInt = WorkStatusFormatter.safeRoundedPercent(cohort.afterReworkPct)
+        let beforeSubtitle = cohort.beforeFirstPassPct.map {
+            "一次过审 \(WorkStatusFormatter.safeRoundedPercent($0))% · 空转 \(bReworkInt)%"
+        } ?? "空转 \(bReworkInt)%"
+        let afterSubtitle = cohort.afterFirstPassPct.map {
+            "一次过审 \(WorkStatusFormatter.safeRoundedPercent($0))% · 空转 \(aReworkInt)%"
+        } ?? "空转 \(aReworkInt)%"
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "scope")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(theme.primary.primary)
+                    .accessibilityHidden(true)
+                Text(DashboardL10n.format(
+                    "dashboard.work_status.cohort_focus_banner",
+                    "版本对照聚焦：%@（%@ → %@）",
+                    cohort.skill,
+                    cohort.previousVersion,
+                    cohort.currentVersion
+                ))
+                .font(.caption.weight(.bold))
+                Spacer(minLength: 8)
+                if selectedCohortID != nil {
+                    Button {
+                        selectedCohortID = nil
+                    } label: {
+                        Text(DashboardL10n.tr("dashboard.work_status.cohort_back_stream", "返回全量视图"))
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 28)
+                }
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 10) {
+                    cohortLaneColumn(
+                        title: DashboardL10n.format(
+                            "dashboard.work_status.cohort_before_lane",
+                            "升级前样本 · %@（%lld）",
+                            cohort.previousVersion,
+                            beforeGoals.count
+                        ),
+                        subtitle: beforeSubtitle,
+                        goals: beforeGoals,
+                        tone: .neutral
+                    )
+                    cohortLaneColumn(
+                        title: DashboardL10n.format(
+                            "dashboard.work_status.cohort_after_lane",
+                            "升级后样本 · %@（%lld）",
+                            cohort.currentVersion,
+                            afterGoals.count
+                        ),
+                        subtitle: afterSubtitle,
+                        goals: afterGoals,
+                        tone: cohort.postFixRecurrenceCount > 0 ? .warning : .success
+                    )
+                }
+                .frame(minWidth: 780)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    cohortLaneColumn(
+                        title: "升级前样本 · \(cohort.previousVersion)（\(beforeGoals.count)）",
+                        subtitle: beforeSubtitle,
+                        goals: beforeGoals,
+                        tone: .neutral
+                    )
+                    cohortLaneColumn(
+                        title: "升级后样本 · \(cohort.currentVersion)（\(afterGoals.count)）",
+                        subtitle: afterSubtitle,
+                        goals: afterGoals,
+                        tone: cohort.postFixRecurrenceCount > 0 ? .warning : .success
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(theme.primary.primary.opacity(0.32), lineWidth: 1)
+        )
+        .captureDashboardGeometry(id: "work-cohort-focus-matrix", role: "cohortMatrix")
+    }
+
+    private func cohortLaneColumn(
+        title: String,
+        subtitle: String,
+        goals: [WorkStatusGoalRow],
+        tone: GoalBadgeTone
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 4)
+                Text(subtitle)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(color(for: tone))
+            }
+            if goals.isEmpty {
+                Text(DashboardL10n.tr("dashboard.work_status.cohort_lane_empty", "当前时间窗口无对应版本 Goal 样本"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(goals.prefix(8)) { goal in
+                    goalRowView(goal)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(theme.neutrals.inner.opacity(0.6), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func threeTierDeflattenedStream(
+        snap: WorkStatusWorkbenchSnapshot,
+        filteredGoals: [WorkStatusGoalRow]
+    ) -> some View {
+        let focusGoals = filteredGoals.filter { !$0.isUnassignedBucket && $0.isFocusAnomaly }
+        let steadyGoals = filteredGoals.filter { !$0.isUnassignedBucket && !$0.isFocusAnomaly }
+        let unassignedGoals = filteredGoals.filter(\.isUnassignedBucket)
+
+        let repoGroups: [WorkStatusRepoDeliveredGroup] = {
+            if selectedFilter == .all && !snap.repoDeliveredGroups.isEmpty {
+                return snap.repoDeliveredGroups
+            }
+            return WorkStatusDerivationHelper.deriveRepoDeliveredGroups(from: steadyGoals)
+        }()
+        let steadyByID = Dictionary(steadyGoals.map { ($0.goalID, $0) }, uniquingKeysWith: { first, _ in first })
+
+        VStack(alignment: .leading, spacing: 14) {
+            // Tier 1: Pinned Focus Anomalies (Active/Blocked + Post-Fix Collision / Multi-Round Rework)
+            if selectedFilter != .delivered || !focusGoals.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionHeaderRow(
+                        icon: "bolt.trianglebadge.exclamationmark.fill",
+                        title: DashboardL10n.tr("dashboard.work_status.tier_focus_title", "焦点跟进（在跑 / 阻塞 / 升级后仍返工）"),
+                        badgeText: "\(focusGoals.count)",
+                        tint: focusGoals.isEmpty ? theme.success : theme.warning
+                    )
+                    if focusGoals.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(theme.success)
+                                .accessibilityHidden(true)
+                            Text(DashboardL10n.tr(
+                                "dashboard.work_status.tier_focus_calm",
+                                "当前无阻塞或新版复发撞墙 Goal，已完结交付已按仓库折叠收纳。"
+                            ))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    } else {
+                        ForEach(Array(focusGoals.prefix(16))) { goal in
+                            goalRowView(goal)
+                        }
+                    }
+                }
+                .captureDashboardGeometry(id: "work-tier-focus-anomalies", role: "focusSection")
+            }
+
+            // Tier 2: Steady First-Pass Delivered Goals Folded by Repository
+            if !repoGroups.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    sectionHeaderRow(
+                        icon: "shippingbox.fill",
+                        title: DashboardL10n.tr("dashboard.work_status.tier_steady_repo_title", "平稳一次过审交付（按项目仓库折叠）"),
+                        badgeText: DashboardL10n.format(
+                            "dashboard.work_status.tier_steady_repo_cnt",
+                            "%lld 仓库 · %lld Goal",
+                            repoGroups.count,
+                            steadyGoals.count
+                        ),
+                        tint: theme.success
+                    )
+                    ForEach(repoGroups) { group in
+                        repoFoldedAccordionCard(group: group, steadyByID: steadyByID)
+                    }
+                }
+                .captureDashboardGeometry(id: "work-tier-repo-folded", role: "repoFoldSection")
+            }
+
+            // Tier 3: Unassigned Daily Standalone Sessions (Secondary Bottom Disclosure)
+            if !unassignedGoals.isEmpty {
+                ForEach(unassignedGoals) { bucket in
+                    unassignedDailyDisclosureBar(bucket)
+                }
+            }
+        }
+    }
+
+    private func sectionHeaderRow(icon: String, title: String, badgeText: String, tint: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(badgeText)
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(tint.opacity(0.15), in: Capsule())
+                .foregroundStyle(tint == theme.warning ? theme.warningOnSubtle : theme.successOnSubtle)
+            Spacer(minLength: 4)
+        }
+    }
+}
+
+@MainActor
+private extension GoalWorkStreamWorkbenchView {
+    private func repoFoldedAccordionCard(
+        group: WorkStatusRepoDeliveredGroup,
+        steadyByID: [String: WorkStatusGoalRow]
+    ) -> some View {
+        let isRepoExpanded = expandedRepos.contains(group.repo)
+        let repoGoals = group.goalIDs.compactMap { steadyByID[$0] }
+        let fpText = group.firstPassRatePct.map { "\(WorkStatusFormatter.safeRoundedPercent($0))% 一次过审" } ?? "平稳完结"
+        let medText = group.medianDurationSec.map { "中位 \(WorkStatusFormatter.durationText($0))" }
+            ?? "累计 \(WorkStatusFormatter.durationText(group.totalDurationSec))"
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                toggleRepo(group.repo)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "folder.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(theme.success)
+                        .accessibilityHidden(true)
+                    Text(group.repo)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(DashboardL10n.format(
+                        "dashboard.work_status.repo_goals_prs",
+                        "完结 %lld Goal · %lld PR",
+                        group.goalsCount,
+                        group.prsCount
+                    ))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(theme.success.opacity(0.14), in: Capsule())
+                    .foregroundStyle(theme.successOnSubtle)
+
+                    Text(fpText)
+                        .font(.caption2.monospacedDigit().weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("· \(medText)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(DashboardL10n.format(
+                        "dashboard.work_status.repo_files_commits",
+                        "改 %lld 文件 · %lld 提交",
+                        group.filesChangedCount,
+                        group.commitsCount
+                    ))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    Image(systemName: isRepoExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .frame(minHeight: 38)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+
+            if isRepoExpanded && !repoGoals.isEmpty {
+                Divider()
+                    .padding(.horizontal, 12)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(repoGoals) { goal in
+                        goalRowView(goal)
+                    }
+                }
+                .padding(10)
+            }
+        }
+        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(theme.neutrals.border.opacity(0.12), lineWidth: 1)
+        )
+        .captureDashboardGeometry(id: "repo-group-\(group.repo)", role: "repoAccordion")
+    }
+
+    private func unassignedDailyDisclosureBar(_ bucket: WorkStatusGoalRow) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                toggleUnassigned()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "tray.2")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(bucket.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text(DashboardL10n.format(
+                        "dashboard.work_status.unassigned_summary",
+                        "%lld 个独立会话 · 累计 %@",
+                        bucket.outputs.sessionCount,
+                        WorkStatusFormatter.durationText(bucket.durationSec)
+                    ))
+                    .font(.caption2.monospacedDigit())
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(theme.neutrals.inner, in: Capsule())
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(
+                        isUnassignedExpanded
+                            ? DashboardL10n.tr("dashboard.work_status.collapse_daily", "收起日常会话")
+                            : DashboardL10n.tr("dashboard.work_status.expand_daily", "按需展开")
+                    )
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    Image(systemName: isUnassignedExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(minHeight: 34)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+
+            if isUnassignedExpanded {
+                Divider()
+                    .padding(.horizontal, 12)
+                GoalWorkStreamExpandableRow(
+                    goal: bucket,
+                    isExpanded: true,
+                    diagnosticVariant: diagnosticVariant,
+                    locale: locale,
+                    reduceMotion: reduceMotion,
+                    onToggleExpand: { toggleUnassigned() },
+                    onOpenSessionReceipt: { session in
+                        activeReceipt = SessionReceiptPresentation(
+                            goalTitle: bucket.title,
+                            goalRepo: bucket.repo,
+                            session: session
+                        )
+                    }
+                )
+                .padding(8)
+            }
+        }
+        .background(theme.neutrals.card.opacity(0.75), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(theme.neutrals.border.opacity(0.1), lineWidth: 1)
+        )
+        .captureDashboardGeometry(id: "unassigned-daily-disclosure", role: "secondaryDisclosure")
+    }
+
+    private func goalRowView(_ goal: WorkStatusGoalRow) -> some View {
+        GoalWorkStreamExpandableRow(
+            goal: goal,
+            isExpanded: expandedGoalIDs.contains(goal.goalID),
+            diagnosticVariant: diagnosticVariant,
+            locale: locale,
+            reduceMotion: reduceMotion,
+            onToggleExpand: { toggleGoal(goal.goalID) },
+            onOpenSessionReceipt: { session in
+                activeReceipt = SessionReceiptPresentation(
+                    goalTitle: goal.title,
+                    goalRepo: goal.repo,
+                    session: session
+                )
+            }
+        )
+    }
+
+    private func toggleRepo(_ repo: String) {
+        let update = {
+            if expandedRepos.contains(repo) {
+                expandedRepos.remove(repo)
+            } else {
+                expandedRepos.insert(repo)
+            }
+        }
+        if reduceMotion {
+            update()
+        } else {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) { update() }
+        }
+    }
+
+    private func toggleUnassigned() {
+        if reduceMotion {
+            isUnassignedExpanded.toggle()
+        } else {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                isUnassignedExpanded.toggle()
+            }
         }
     }
 
@@ -463,7 +1563,7 @@ public struct GoalWorkStreamWorkbenchView: View {
             }
         }
         if reduceMotion {
-            update()
+            withAnimation(nil) { update() }
         } else {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 update()
@@ -500,115 +1600,6 @@ public struct GoalWorkStreamWorkbenchView: View {
             Spacer(minLength: 4)
         }
         .accessibilityIdentifier("dashboard.goalWorkStreamPartialBanner")
-        .accessibilityElement(children: .combine)
-    }
-
-    private func kpiPillsBand(_ snap: WorkStatusWorkbenchSnapshot) -> some View {
-        let assigned = snap.goals.filter { !$0.isUnassignedBucket }
-        let activeCount = assigned.filter { GoalWorkStreamFilter.activeAndBlocked.matches($0) }.count
-        let blockedCount = assigned.filter { $0.status.lowercased() == "blocked" }.count
-        let deliveredCount = assigned.filter { GoalWorkStreamFilter.delivered.matches($0) }.count
-        let avgGoalMinutes = assigned.isEmpty
-            ? (snap.pulse.durationSec / Double(max(1, snap.pulse.bucketsCount)) / 60.0)
-            : (assigned.reduce(0.0) { $0 + $1.durationSec } / Double(assigned.count) / 60.0)
-        let evaluated = assigned.filter { $0.reviewRoundBadge != nil }
-        let firstPassCount = evaluated.filter(\.isFirstPassReview).count
-        let passRateText: String = {
-            if !evaluated.isEmpty {
-                let pct = Int((100.0 * Double(firstPassCount) / Double(evaluated.count)).rounded())
-                return "\(pct)%"
-            }
-            if let effRate = summary?.agentEfficiency?.roundSummary.r1PassRate {
-                return "\(Int((effRate * 100.0).rounded()))%"
-            }
-            return "—"
-        }()
-        let optimizeSignalsCount = snap.goals.reduce(0) { acc, goal in
-            acc + goal.aiSignals.filter { $0.severity == "warning" || $0.severity == "info" }.count
-        }
-
-        return DashboardResponsiveGrid(wideColumns: 4, compactColumns: 2) {
-            kpiPillCard(
-                id: "work-kpi-active",
-                title: DashboardL10n.tr("dashboard.work_status.kpi_active", "活跃 / 阻塞 Goal"),
-                primaryText: "\(activeCount) / \(blockedCount)",
-                detailText: DashboardL10n.format(
-                    "dashboard.work_status.kpi_active_sub",
-                    "共 %lld 个独立 Goal",
-                    snap.pulse.goalsCount
-                ),
-                tone: blockedCount > 0 ? .warning : .primary
-            )
-            kpiPillCard(
-                id: "work-kpi-delivered",
-                title: DashboardL10n.tr("dashboard.work_status.kpi_delivered", "14天完结 Goal / 合入 PR"),
-                primaryText: "\(deliveredCount) / \(snap.pulse.prsTouchedCount) PR",
-                detailText: DashboardL10n.format(
-                    "dashboard.work_status.kpi_delivered_sub",
-                    "改 %lld 文件 · %lld 提交",
-                    snap.pulse.filesChangedCount,
-                    snap.pulse.commitsCount
-                ),
-                tone: .success
-            )
-            kpiPillCard(
-                id: "work-kpi-efficiency",
-                title: DashboardL10n.tr("dashboard.work_status.kpi_pass_duration", "平均耗时 & 一次过审率"),
-                primaryText: String(format: "%.0fm · %@", avgGoalMinutes, passRateText),
-                detailText: DashboardL10n.format(
-                    "dashboard.work_status.kpi_sessions_sub",
-                    "%lld 会话 · %@ tok",
-                    snap.pulse.sessionsCount,
-                    DashboardTokenFormatter.compact(snap.pulse.totalTokens)
-                ),
-                tone: .primary
-            )
-            kpiPillCard(
-                id: "work-kpi-signals",
-                title: DashboardL10n.tr("dashboard.work_status.kpi_signals", "AI 识别待提效项"),
-                primaryText: "\(optimizeSignalsCount)",
-                detailText: DashboardL10n.format(
-                    "dashboard.work_status.kpi_signals_sub",
-                    "空载技能与重试摩擦汇总"
-                ),
-                tone: optimizeSignalsCount > 0 ? .warning : .success
-            )
-        }
-    }
-
-    private func kpiPillCard(
-        id: String,
-        title: String,
-        primaryText: String,
-        detailText: String,
-        tone: GoalBadgeTone
-    ) -> some View {
-        let accent = color(for: tone)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Text(primaryText)
-                .font(.system(.title3, design: .rounded, weight: .bold))
-                .monospacedDigit()
-                .foregroundStyle(accent)
-                .lineLimit(1)
-                .layoutPriority(1)
-            Text(detailText)
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.neutrals.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(theme.neutrals.border.opacity(0.12), lineWidth: 1)
-        )
-        .captureDashboardGeometry(id: id, role: "kpiPill")
         .accessibilityElement(children: .combine)
     }
 
@@ -669,7 +1660,7 @@ public struct GoalWorkStreamWorkbenchView: View {
                 .fill(tint)
                 .frame(width: 7, height: 7)
                 .accessibilityHidden(true)
-            Text("\(label) \(Int(pct.rounded()))%")
+            Text("\(label) \(WorkStatusFormatter.safeRoundedPercent(pct))%")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -845,11 +1836,30 @@ public struct GoalWorkStreamWorkbenchView: View {
 private struct GoalWorkStreamExpandableRow: View {
     let goal: WorkStatusGoalRow
     let isExpanded: Bool
+    let diagnosticVariant: GoalExpandedDiagnosticVariant
     let locale: Locale
     let reduceMotion: Bool
     let onToggleExpand: () -> Void
     let onOpenSessionReceipt: (WorkStatusSessionReceipt) -> Void
     private let theme = Theme.system
+
+    init(
+        goal: WorkStatusGoalRow,
+        isExpanded: Bool,
+        diagnosticVariant: GoalExpandedDiagnosticVariant = .watermarkPillsPlusRoleRelayBar,
+        locale: Locale,
+        reduceMotion: Bool,
+        onToggleExpand: @escaping () -> Void,
+        onOpenSessionReceipt: @escaping (WorkStatusSessionReceipt) -> Void
+    ) {
+        self.goal = goal
+        self.isExpanded = isExpanded
+        self.diagnosticVariant = diagnosticVariant
+        self.locale = locale
+        self.reduceMotion = reduceMotion
+        self.onToggleExpand = onToggleExpand
+        self.onOpenSessionReceipt = onOpenSessionReceipt
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -906,22 +1916,21 @@ private struct GoalWorkStreamExpandableRow: View {
 
             HStack(alignment: .center, spacing: 10) {
                 WorkStatusActionSplitBar(split: goal.actionSplit, height: 7)
-                    .frame(minWidth: 140, maxWidth: 260)
+                    .frame(minWidth: 130, maxWidth: 210)
                 Text(splitCompactText(goal.actionSplit))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .layoutPriority(1)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 5) {
-                        ForEach(goal.skillsUsed.prefix(4)) { sk in
-                            skillChip(sk)
-                        }
-                        ForEach(goal.aiSignals.filter { $0.severity == "warning" }.prefix(1)) { sig in
-                            signalChip(sig)
-                        }
+                HStack(spacing: 5) {
+                    ForEach(goal.skillWatermarks.prefix(2)) { wm in
+                        watermarkChip(wm, compact: true)
+                    }
+                    ForEach(goal.skillsUsed.prefix(goal.skillWatermarks.isEmpty ? 3 : 1)) { sk in
+                        skillChip(sk)
                     }
                 }
+                Spacer(minLength: 4)
             }
         }
     }
@@ -983,26 +1992,86 @@ private struct GoalWorkStreamExpandableRow: View {
         return capsuleTag("\(item.skill) · \(suffix)", fg: fg, bg: bg)
     }
 
-    private func signalChip(_ sig: WorkStatusAISignal) -> some View {
+    private func watermarkChip(_ wm: WorkStatusGoalSkillWatermark, compact: Bool = false) -> some View {
         let isZh = locale.language.languageCode?.identifier.hasPrefix("zh") ?? true
-        let raw = isZh ? sig.labelZh : sig.labelEn
-        let concise = raw.count > 26 ? String(raw.prefix(25)) + "…" : raw
-        return capsuleTag(concise, fg: theme.warningOnSubtle, bg: theme.warning.opacity(0.14))
+        let tone: GoalBadgeTone = {
+            switch wm.watermarkState {
+            case "post_fix_recurring": return .warning
+            case "pre_fix_legacy": return .neutral
+            default: return .success
+            }
+        }()
+        let iconName: String = {
+            switch wm.watermarkState {
+            case "post_fix_recurring": return "exclamationmark.triangle.fill"
+            case "pre_fix_legacy": return "clock.arrow.circlepath"
+            default: return "checkmark.circle.fill"
+            }
+        }()
+        let rawLabel = compact
+            ? "\(wm.skill) · \(isZh ? wm.summaryZh : wm.summaryEn)"
+            : (isZh ? wm.labelZh : wm.labelEn)
+        let text = WorkStatusFormatter.sanitizedSummary(rawLabel) ?? rawLabel
+        return HStack(spacing: 4) {
+            Image(systemName: iconName)
+                .font(.caption2)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(bgColor(tone), in: Capsule())
+        .foregroundStyle(fgColor(tone))
     }
 
     private var expandedChildSessionsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Divider()
+
+            if !goal.skillWatermarks.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(DashboardL10n.tr("dashboard.work_status.watermark_section_title", "命中的技能版本水位（区分旧版遗留与新版复发）"))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(goal.skillWatermarks.prefix(4)) { wm in
+                            watermarkChip(wm, compact: false)
+                        }
+                    }
+                }
+                .captureDashboardGeometry(id: "goal-watermarks-\(goal.goalID)", role: "watermarkStrip")
+            }
+
+            if !goal.roleRelay.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(DashboardL10n.tr("dashboard.work_status.role_relay_title", "角色接力耗时条"))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if diagnosticVariant == .watermarkPillsPlusRoleRelayBar {
+                        RoleRelayDurationBar(items: goal.roleRelay, locale: locale, height: 8)
+                    } else {
+                        timelineStepRelayList
+                    }
+                }
+                .padding(8)
+                .background(theme.neutrals.inner.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .captureDashboardGeometry(id: "goal-role-relay-\(goal.goalID)", role: "roleRelay")
+            }
+
             if !goal.aiSignals.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(goal.aiSignals.prefix(2)) { sig in
                         let isZh = locale.language.languageCode?.identifier.hasPrefix("zh") ?? true
                         let tone: GoalBadgeTone = sig.severity == "positive" ? .success : (sig.severity == "warning" ? .warning : .primary)
+                        let rawSig = isZh ? sig.labelZh : sig.labelEn
+                        let cleanSig = WorkStatusFormatter.sanitizedSummary(rawSig) ?? rawSig
                         HStack(spacing: 4) {
                             Image(systemName: sig.severity == "positive" ? "checkmark.seal.fill" : "sparkles")
                                 .font(.caption2)
                                 .accessibilityHidden(true)
-                            Text(isZh ? sig.labelZh : sig.labelEn)
+                            Text(cleanSig)
                                 .font(.caption2)
                                 .lineLimit(1)
                         }
@@ -1020,6 +2089,40 @@ private struct GoalWorkStreamExpandableRow: View {
             }
         }
         .padding(.leading, 14)
+    }
+
+    private var timelineStepRelayList: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(goal.roleRelay) { item in
+                let roleTitle = WorkStatusFormatter.plainRoleBadge(
+                    roleKey: item.roleKey,
+                    zh: item.roleLabelZh,
+                    en: item.roleLabelEn,
+                    locale: locale
+                )
+                HStack(spacing: 8) {
+                    Text(roleTitle)
+                        .font(.caption2.weight(.bold))
+                        .frame(width: 68, alignment: .leading)
+                    Canvas { context, size in
+                        let rect = CGRect(origin: .zero, size: size)
+                        context.fill(Capsule().path(in: rect), with: .color(theme.neutrals.card))
+                        let ratio = CGFloat(min(max(item.sharePct / 100.0, 0.04), 1.0))
+                        let fillRect = CGRect(x: 0, y: 0, width: max(4, size.width * ratio), height: size.height)
+                        context.fill(
+                            Capsule().path(in: fillRect),
+                            with: .color(item.reworkCalls > 0 ? theme.warning : theme.primary.primary)
+                        )
+                    }
+                    .frame(height: 6)
+                    .accessibilityHidden(true)
+                    Text("\(WorkStatusFormatter.durationText(item.durationSec)) · \(WorkStatusFormatter.safeRoundedPercent(item.sharePct))%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 84, alignment: .trailing)
+                }
+            }
+        }
     }
 
     private func childSessionRow(_ session: WorkStatusSessionReceipt) -> some View {
@@ -1095,9 +2198,9 @@ private struct GoalWorkStreamExpandableRow: View {
         DashboardL10n.format(
             "dashboard.work_status.split_compact_format",
             "读 %lld%% · 改 %lld%% · 测 %lld%%",
-            Int(s.searchReadPct.rounded()),
-            Int(s.codeEditPct.rounded()),
-            Int(s.verifyScriptPct.rounded())
+            WorkStatusFormatter.safeRoundedPercent(s.searchReadPct),
+            WorkStatusFormatter.safeRoundedPercent(s.codeEditPct),
+            WorkStatusFormatter.safeRoundedPercent(s.verifyScriptPct)
         )
     }
 
@@ -1325,7 +2428,7 @@ public struct SessionWorkReceiptSheet: View {
                 .fill(tint)
                 .frame(width: 7, height: 7)
                 .accessibilityHidden(true)
-            Text("\(title) \(calls) (\(Int(pct.rounded()))%)")
+            Text("\(title) \(calls) (\(WorkStatusFormatter.safeRoundedPercent(pct))%)")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
